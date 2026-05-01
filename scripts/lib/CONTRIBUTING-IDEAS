@@ -1,0 +1,136 @@
+Good First Contributions — VM Provisioning Scripts
+===================================================
+
+Welcome! This file lists concrete, self-contained improvements to the VM
+provisioning scripts under scripts/. They are ideal starting points if you
+want to contribute to Phantom Tracker but are not sure where to begin.
+
+Each item is scoped to a small number of files, requires no prior knowledge
+of the eBPF or kernel parts of the project, and has a clear acceptance
+criterion. Shell scripting experience is sufficient for all of them.
+
+If you pick one up, open an issue to let others know you are working on it.
+
+-------------------------------------------------------------------------------
+
+Security
+--------
+
+[ ] Hash the VM console password instead of storing it in plaintext
+    File:  scripts/lib/cloudinit.sh
+    Why:   The --password argument is currently written as plain text into the
+           seed ISO inside the 'plain_text_passwd' cloud-init field. Anyone
+           with read access to the ISO can recover the password.
+    How:   Use 'openssl passwd -6 <password>' to produce a SHA-512 hash and
+           write it to 'hashed_passwd' instead. The hash should be computed in
+           create_vm.sh before calling cloudinit_make_iso, so the plaintext
+           never touches the ISO.
+    Skill: bash, openssl, cloud-init user-data format
+
+[ ] Restrict read permissions on the seed ISO
+    File:  scripts/lib/cloudinit.sh (cloudinit_make_iso)
+    Why:   The seed ISO is created with default umask permissions, so other
+           users on the same host can read it and extract the password.
+    How:   Add 'chmod 600 "$iso"' immediately after xorriso writes the file.
+    Skill: bash, Linux file permissions
+
+[ ] Replace SLIRP networking with a host bridge
+    File:  scripts/create_vm.sh
+    Why:   The current '-net user' option uses QEMU's built-in SLIRP stack.
+           It is slow, provides no isolation between VMs, and does not support
+           inbound connections without explicit port forwarding.
+    How:   Create a TAP interface per VM and attach it to a Linux bridge
+           (ip tuntap, ip link, brctl or 'ip link set ... master'). Replace
+           the '-net user' flags in QEMU_CMD with '-netdev tap,...' and
+           '-device virtio-net-pci,...'. Add a corresponding teardown path.
+    Skill: bash, Linux networking (bridge, TAP), iproute2
+
+-------------------------------------------------------------------------------
+
+Reliability
+-----------
+
+[ ] Verify the base image checksum after download
+    File:  scripts/lib/cloudinit.sh (cloudinit_fetch_base_image)
+    Why:   A partial download or a corrupted file will produce broken VMs with
+           no clear error message. Debian publishes a SHA256SUMS file alongside
+           each cloud image.
+    How:   After wget completes, download the corresponding SHA256SUMS file
+           from the same URL directory and run 'sha256sum --check' against the
+           downloaded image. Delete the image and exit with an error if the
+           check fails.
+    Skill: bash, wget, sha256sum
+
+[ ] Make the base image download resumable
+    File:  scripts/lib/cloudinit.sh (cloudinit_fetch_base_image)
+    Why:   The Debian base image is ~400 MB. If the download is interrupted,
+           the script currently restarts from zero on the next run.
+    How:   Add '--continue' to the wget call so partial downloads are resumed.
+           Also add '--tries=3' for automatic retry on transient failures.
+    Skill: bash, wget
+
+[ ] Warn when the base image backing path is no longer valid
+    File:  scripts/lib/cloudinit.sh (cloudinit_create_overlay) or
+           scripts/create_vm.sh
+    Why:   qemu-img stores the base image as an absolute path inside the
+           overlay. If the base image is moved or renamed after the overlay
+           was created, QEMU fails at boot with a cryptic error.
+    How:   Before launching QEMU, use 'qemu-img info --output=json <overlay>'
+           to extract the backing file path and check that it still exists.
+           Print a clear error with the missing path if it does not.
+    Skill: bash, qemu-img, JSON parsing (jq or grep)
+
+-------------------------------------------------------------------------------
+
+Scalability
+-----------
+
+[ ] Allocate SSH port automatically instead of defaulting to 2222
+    File:  scripts/create_vm.sh, scripts/lib/args.sh
+    Why:   If two VMs are started with the default --ssh-port, the second QEMU
+           process fails silently because port 2222 is already in use.
+    How:   When --ssh-port is not provided by the user, scan for a free port
+           starting from 2222 using 'ss -tlnp' or by attempting to bind.
+           Print the chosen port clearly so the user knows how to connect.
+    Skill: bash, ss/netstat, port allocation
+
+[ ] Add a VM inventory file
+    File:  scripts/create_vm.sh (new helper, e.g. scripts/lib/inventory.sh)
+    Why:   After creating several VMs there is no record of which VMs exist,
+           what port they are on, or where their disks are. Every management
+           operation requires the user to remember or guess.
+    How:   On successful VM creation, append a record to a file such as
+           ~/.phantom-tracker/vms (JSON or TSV). Each record should include:
+           name, disk path, seed ISO path, SSH port, NUMA socket, creation
+           date. Provide a companion list_vms.sh script that prints the
+           inventory in a readable table.
+    Skill: bash, JSON or text file handling
+
+[ ] Manage vsock CID allocation across multiple VMs
+    File:  scripts/create_vm.sh, scripts/lib/inventory.sh (if implemented)
+    Why:   vhost-vsock requires a unique guest-cid per VM on the same host.
+           CIDs 0 (hypervisor) and 1 (local) are reserved by the kernel;
+           CIDs 2 and 3 are also typically reserved. Currently the --vsock-cid
+           argument defaults to 4 for all VMs, so launching a second VM
+           without an explicit --vsock-cid will result in a QEMU error or
+           silent failure.
+    How:   Track allocated CIDs in the VM inventory file. On VM creation,
+           if --vsock-cid is not provided, pick the lowest free CID >= 4 that
+           is not already in use by a running VM (check /dev/vhost-vsock and
+           the inventory). Release the CID when the VM is destroyed.
+   Skill: bash, vsock/vhost-vsock, VM inventory
+
+[ ] Add cgroup memory limits to match libvirt's resource isolation
+    File:  scripts/create_vm.sh
+    Why:   The per-VM systemd scope currently only isolates CPU time. Without
+           memory limits, VMs compete for host RAM through the kernel's page
+           reclaim with no per-VM ceiling. libvirt sets three properties on
+           every scope: MemoryHigh (soft limit, triggers reclaim early),
+           MemoryMax (hard OOM kill ceiling), and MemorySwapMax=0 (no swap).
+    How:   Parse --mem (e.g. "4G") into MiB. Add to the systemd-run call:
+             --property="MemoryHigh=$((mem_mib + 256))M"
+             --property="MemoryMax=$((mem_mib + 512))M"
+             --property="MemorySwapMax=0"
+           The 256M/512M overhead constants match libvirt's defaults and cover
+           QEMU process memory (vCPU threads, device emulation, QEMU heap).
+    Skill: bash, cgroup v2, systemd-run --property

@@ -1,0 +1,133 @@
+VM Provisioning Scripts
+=======================
+
+This directory contains scripts for creating and managing QEMU/KVM virtual
+machines used in the Phantom Tracker project. VMs are provisioned from Debian
+cloud images using cloud-init and run with KVM acceleration on x86_64 hosts.
+
+
+Quick start
+-----------
+
+    bash create_vm.sh --name=foo --ssh-pubkey=~/.ssh/id_xxxx.pub
+
+On first run, this downloads the Debian 12 base image (~400 MB), creates a
+per-VM qcow2 overlay disk, generates a cloud-init seed ISO, and boots the VM.
+Subsequent runs with the same --name skip provisioning and boot straight from
+the existing disk.
+
+Once the VM has booted (first boot takes 1-2 minutes for cloud-init):
+
+    ssh -p 2222 debian@localhost
+
+The default console password is "debian". To shut down cleanly from inside
+the VM:
+
+    sudo systemctl poweroff
+
+To stop a running VM from the host:
+
+    systemctl stop qemu-foo.scope          # graceful (ACPI shutdown)
+    systemctl kill --kill-whom=all --signal=SIGKILL qemu-foo.scope  # immediate
+
+
+create_vm.sh — arguments
+------------------------
+
+Required:
+  --name=<name>         Name of the VM. Used for disk/ISO filenames and the
+                        systemd scope. Allowed chars: letters, digits, . _ -
+  --ssh-pubkey=<path>   Path to an SSH public key file to inject into the VM.
+
+Optional:
+  --password=<pass>     Password for the debian user (default: debian).
+  --sockets=<n>         Number of CPU sockets (default: 1).
+  --cores=<n>           Number of cores per socket (default: 2).
+  --threads=<n>         Number of threads per core (default: 1).
+                        Total vCPUs = sockets * cores * threads.
+  --mem=<size>          RAM size, e.g. 4G or 512M (default: 4G).
+  --disk-size=<size>    Disk image size, e.g. 20G (default: 20G).
+  --base-image=<path>   Path to base qcow2 cloud image; downloaded from
+                        Debian if absent (default: debian-12-generic-amd64.qcow2).
+  --ssh-port=<port>     Host port forwarded to guest SSH (default: 2222).
+  --add-vsock=<bool>    Add a vhost-vsock device (default: false).
+  --vsock-cid=<cid>     Guest CID for vhost-vsock. Required when
+                        --add-vsock=true.
+  --per-vm-cgroups=<bool>
+                        Place the VM in a systemd transient scope under
+                        machine.slice, matching libvirt's cgroup layout
+                        (default: true). Requires systemd-run.
+  --pin-to-socket=<bool>
+                        Pin the VM to a specific NUMA node using numactl
+                        (default: false).
+  --socket-nr=<n>       NUMA node number to pin to. Required when
+                        --pin-to-socket=true.
+
+Pass --help for a summary.
+
+
+Examples
+--------
+
+Minimal VM, 2 vCPUs, 4G RAM:
+
+    bash create_vm.sh \
+        --name=foo \
+        --ssh-pubkey=~/.ssh/id_ed25519.pub
+
+36-core VM pinned to NUMA node 0 with vsock:
+
+    bash create_vm.sh \
+        --name=bench \
+        --ssh-pubkey=~/.ssh/id_ed25519.pub \
+        --sockets=1 --cores=36 --threads=1 \
+        --mem=45G \
+        --pin-to-socket=true --socket-nr=0 \
+        --add-vsock=true --vsock-cid=4
+
+Re-provision a VM (delete its disk and seed ISO first):
+
+    rm foo.qcow2 foo-seed.iso
+    bash create_vm.sh --name=foo --ssh-pubkey=~/.ssh/id_xxxx.pub
+
+
+Library files (lib/)
+--------------------
+
+  args.sh        Named argument parsing. Provides declare_arg, parse_args,
+                 and print_usage. Arguments use --key=value syntax.
+
+  cloudinit.sh   cloud-init provisioning for Debian VMs. Downloads the base
+                 image, creates a per-VM qcow2 overlay, and generates a
+                 seed ISO using xorriso.
+
+  distro.sh      Host distro detection and install-hint helpers. Used by
+                 check_cmd to print the correct package manager command when
+                 a dependency is missing.
+
+  numa.sh        NUMA topology helpers reading /sys/devices/system/node.
+                 Provides numa_check, numa_node_count, and numa_cpulist.
+
+  CONTRIBUTING-IDEAS
+                 Suggested improvements for new contributors. Read this if
+                 you want to contribute but are not sure where to start.
+
+
+Dependencies
+------------
+
+Runtime (checked at startup):
+  qemu-system-x86_64    Debian/Ubuntu: qemu-system-x86
+                        Fedora/RHEL:   qemu-kvm
+  numactl               All distros:   numactl
+
+First-boot provisioning only:
+  wget                  For downloading the base cloud image.
+  xorriso               For generating the cloud-init seed ISO.
+                        Debian/Ubuntu: xorriso
+                        Arch:          libisoburn
+                        Gentoo:        libisoburn
+
+Optional:
+  systemd-run           For per-VM cgroups (part of systemd, present on most
+                        distros).
