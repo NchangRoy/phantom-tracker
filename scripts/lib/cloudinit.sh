@@ -85,7 +85,9 @@ package_update: true
 package_upgrade: false
 packages:
   - qemu-guest-agent
+  - openssh-server
 runcmd:
+  - systemctl enable --now ssh
   - systemctl enable --now qemu-guest-agent
 EOF
 
