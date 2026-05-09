@@ -99,6 +99,15 @@ TOTAL_VCPUS=$(( ARG_SOCKETS * ARG_CORES * ARG_THREADS ))
 CPU_TOPOLOGY="$TOTAL_VCPUS,sockets=$ARG_SOCKETS,cores=$ARG_CORES,threads=$ARG_THREADS"
 
 # --- QEMU command ---
+
+
+#--vm qmp socket definition ----
+QMP_SOCKET="/tmp/${ARG_NAME}-qmp.sock"
+#--start and pass qmp socket to  register_vm.sh 
+
+bash register_vm.sh  --socket=$QMP_SOCKET
+rm -f "$QMP_SOCKET"
+
 QEMU_CMD=(
     qemu-system-x86_64
     -enable-kvm
@@ -111,6 +120,7 @@ QEMU_CMD=(
     -net nic,model=virtio
     -net "user,hostfwd=tcp::${ARG_SSH_PORT}-:22"
     -nographic
+    -qmp "unix:${QMP_SOCKET},server,nowait"
 )
 
 if [[ "$ARG_ADD_VSOCK" == "true" ]]; then
