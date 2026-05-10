@@ -3,7 +3,7 @@
 #
 # Contributors:
 #   Human: Himadri Chhaya-Shailesh
-#   AI: Claude Sonet 4.6
+#   AI: Claude Sonet 4.6, ChatGPT-5.5
 #
 # Distro detection and package install hint helpers.
 #
@@ -32,16 +32,16 @@ distro_id() {
 #   distro_install_hint xorriso arch=libisoburn gentoo=libisoburn
 distro_install_hint() {
     local default_pkg="$1"
-    shift
+    shift # Remove the first argument from the list of arguments
 
     local distro
     distro="$(distro_id)"
 
     # Build override map from KEY=VALUE args
     local pkg="$default_pkg"
-    for override in "$@"; do
-        local key="${override%%=*}"
-        local val="${override#*=}"
+    for override in "$@"; do # Iterate over remaining arguments for overrides
+        local key="${override%%=*}" # Remove chars after =
+        local val="${override#*=}" # Remove chars before =
         if [[ "$distro" == "$key" ]]; then
             pkg="$val"
             break
@@ -80,10 +80,10 @@ distro_install_hint() {
 check_cmd() {
     local cmd="$1"
     shift
-    if ! command -v "$cmd" &>/dev/null; then
+    if ! command -v "$cmd" &>/dev/null; then # check whether the command exists in path
         echo "error: required tool not found: $cmd" >&2
         echo "  install it with:" >&2
-        distro_install_hint "$@" >&2
+        distro_install_hint "$@" >&2 # pass the reamaining args for the install hint
         return 1
     fi
     return 0

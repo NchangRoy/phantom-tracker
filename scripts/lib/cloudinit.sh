@@ -3,7 +3,7 @@
 #
 # Contributors:
 #   Human: Himadri Chhaya-Shailesh
-#   AI: Claude Sonet 4.6
+#   AI: Claude Sonet 4.6, ChatGPT-5.5
 #
 # cloud-init seed ISO helpers.
 #
