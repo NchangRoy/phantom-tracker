@@ -11,12 +11,22 @@
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/errno.h>
+#include <linux/mm.h>
+#include <linux/vmalloc.h>
 
 /* grep for the following string in dmesg for debugging */
 #define HOST_IVSHMEM_NAME "host_ivshmem"
 
 /* Maximum number of backends supported at the same time */
 #define HOST_IVSHMEM_MAX_DEVS 1024U
+
+/*
+ * For now, each backend owns exactly two pages:
+ *   page 0: host-to-guest communication
+ *   page 1: guest-to-host communication
+ */
+#define HOST_IVSHMEM_SIZE (2 * PAGE_SIZE)
 
 /*
  * When we create a character device, userspace accesses it via a /dev node.
@@ -44,14 +54,113 @@ static dev_t host_ivshmem_devt;
  */
 static struct class *host_ivshmem_class;
 
+/*
+ * One static ivshmem backend instance for initial testing.
+ *
+ * cdev  - Connects this backend to file_operations.
+ * dev   - Represents this backend in sysfs and enables /dev node creation
+ * mem   - Kernel memory backing the shared-memory region
+ * size  - Size of the shared-memory region
+ * minor - Minor number assigned to this backend
+ */
+struct host_ivshmem_backend {
+	struct cdev cdev;
+	struct device *dev;
+	void *mem;
+	size_t size;
+	int minor;
+};
+
+static struct host_ivshmem_backend backend = {
+	.size = HOST_IVSHMEM_SIZE,
+	.minor = 0,
+};
+
+static int host_ivshmem_open(struct inode *inode, struct file *file)
+{
+	if (iminor(inode) != backend.minor)
+		return -ENODEV;
+
+	/* Save the backend pointer to be later used by the fops */
+	file->private_data = &backend;
+	return 0;
+}
+
+static int host_ivshmem_release(struct inode *inode, struct file *file)
+{
+	file->private_data = NULL;
+	return 0;
+}
+
+/* Minimal file operations for testing the static backend */
+static const struct file_operations host_ivshmem_fops = {
+	.owner = THIS_MODULE,
+	.open = host_ivshmem_open,
+	.release = host_ivshmem_release,
+	.llseek = noop_llseek,
+};
+
+static int host_ivshmem_create_static_backend(void)
+{
+	dev_t devt = MKDEV(MAJOR(host_ivshmem_devt), backend.minor);
+	int ret;
+
+	/* Allocate zero-filled, page-backed memory */
+	backend.mem = vmalloc_user(backend.size);
+	if (!backend.mem)
+		return -ENOMEM;
+
+	/* Bind this backend's device number to our fops. */
+	cdev_init(&backend.cdev, &host_ivshmem_fops);
+	backend.cdev.owner = THIS_MODULE;
+
+	ret = cdev_add(&backend.cdev, devt, 1);
+	if (ret)
+		goto err_free_mem;
+
+	backend.dev = device_create(host_ivshmem_class, NULL, devt, &backend,
+					    "host_ivshmem%d", backend.minor);
+	if (IS_ERR(backend.dev)) {
+		ret = PTR_ERR(backend.dev);
+		backend.dev = NULL;
+		goto err_del_cdev;
+	}
+
+	pr_info("host_ivshmem: created /dev/host_ivshmem%d size=%zu\n",
+		backend.minor, backend.size);
+	return 0;
+
+err_del_cdev:
+	cdev_del(&backend.cdev);
+err_free_mem:
+	vfree(backend.mem);
+	backend.mem = NULL;
+	return ret;
+}
+
+static void host_ivshmem_destroy_static_backend(void)
+{
+	dev_t devt = MKDEV(MAJOR(host_ivshmem_devt), backend.minor);
+
+	if (backend.dev) {
+		device_destroy(host_ivshmem_class, devt);
+		backend.dev = NULL;
+	}
+
+	cdev_del(&backend.cdev);
+
+	vfree(backend.mem);
+	backend.mem = NULL;
+}
+
 static int __init host_ivshmem_init(void)
 {
     int ret;
 
     /* 
-     * Reserve a range of character-device numbers for this module
+     * Reserve a range of character-device numbers for this module.
      * The kernel chooses a free major number for us and reserves
-     * HOST_IVSHMEM_MAX_DEVS minor numbers starting at minor 0.
+     * HOST_IVSHMEM_MAX_DEVS minor numbers starting at 0.
      * 
      * Later, the per-VM ivshmem backends will use the minor numbers in this
      * range, and userspace will access them via the corresponding
@@ -69,17 +178,29 @@ static int __init host_ivshmem_init(void)
 		ret = PTR_ERR(host_ivshmem_class);
 		unregister_chrdev_region(host_ivshmem_devt,
 					 HOST_IVSHMEM_MAX_DEVS);
-		return ret;
+		goto err_unregister_chrdev;
 	}
+
+    ret = host_ivshmem_create_static_backend();
+
+	if (ret)
+		goto err_destroy_class;
 
 	pr_info("host_ivshmem: loaded major=%u\n",
 		MAJOR(host_ivshmem_devt));
 	return 0;
-    
+
+err_destroy_class:
+	class_destroy(host_ivshmem_class);
+	host_ivshmem_class = NULL;
+err_unregister_chrdev:
+	unregister_chrdev_region(host_ivshmem_devt, HOST_IVSHMEM_MAX_DEVS);
+	return ret;    
 }
 
 static void __exit host_ivshmem_exit(void)
 {
+    host_ivshmem_destroy_static_backend();
     class_destroy(host_ivshmem_class);
 	unregister_chrdev_region(host_ivshmem_devt, HOST_IVSHMEM_MAX_DEVS);
 	pr_info("host_ivshmem: unloaded\n");
