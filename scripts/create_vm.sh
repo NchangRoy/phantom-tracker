@@ -3,11 +3,12 @@
 #
 # Contributors:
 #   Human: Himadri Chhaya-Shailesh
-#   AI: Claude Sonet 4.6
+#   AI: Claude Sonet 4.6, ChatGPT-5.5
 #
-# Usage: create_vm.sh --name <vm-name>
+# Usage: create_vm.sh --name=<vm-name> --ssh-pubkey=<path-to-ssh-pubkey> [options]
+#
 
-set -euo pipefail
+set -euo pipefail # exit on error, unset variable, or failed pipeline
 
 arch="$(uname -m)"
 if [[ "$arch" != "x86_64" ]]; then
@@ -15,6 +16,7 @@ if [[ "$arch" != "x86_64" ]]; then
     exit 1
 fi
 
+# source helper scripts from lib/
 . "$(dirname "$0")/lib/args.sh"
 . "$(dirname "$0")/lib/numa.sh"
 . "$(dirname "$0")/lib/cloudinit.sh"
@@ -41,23 +43,27 @@ declare_arg per-vm-cgroups    optional "Use cgroups for the VM" true
 declare_arg pin-to-socket     optional "Pin VM to a specific NUMA node" false
 declare_arg socket-nr         optional "NUMA node number (required when --pin-to-socket=true)"
 
-parse_args "$@"
+parse_args "$@" # parse all space-separated args
 
+# We use the same name for pvsched-shmem backends and VM names, so validate the name here before we do any work.
 if [[ ! "$ARG_NAME" =~ ^[a-zA-Z0-9._-]+$ ]]; then
     echo "error: --name must contain only letters, digits, '.', '_', or '-'" >&2
     exit 1
 fi
 
+# We use vsocks for generating host-guest traces
 if [[ "$ARG_ADD_VSOCK" == "true" && -z "${ARG_VSOCK_CID:-}" ]]; then
     echo "error: --vsock-cid is required when --add-vsock is true" >&2
     exit 1
 fi
 
+# On multi-numa hosts, pinning a VM to a single numa-node is the standard practice, and we support this
 if [[ "$ARG_PIN_TO_SOCKET" == "true" && -z "${ARG_SOCKET_NR:-}" ]]; then
     echo "error: --socket-nr is required when --pin-to-socket is true" >&2
     exit 1
 fi
 
+# We don't use one-to-one vCPU to pCPU mapping, but rather allow the host scheduler to distribute vCPUs across the host pCPUs of the specified numa node.
 PCPU_LIST=""
 if [[ "$ARG_PIN_TO_SOCKET" == "true" ]]; then
     numa_check
@@ -70,6 +76,7 @@ if [[ "$ARG_PIN_TO_SOCKET" == "true" ]]; then
     echo "socket $ARG_SOCKET_NR pCPUs: $PCPU_LIST"
 fi
 
+# Print the effective configuration before launching the VM.
 echo "name: $ARG_NAME"
 echo "pin-to-socket: $ARG_PIN_TO_SOCKET"
 echo "socket-nr: ${ARG_SOCKET_NR:-}"
@@ -141,12 +148,12 @@ if [[ "$ARG_PER_VM_CGROUPS" == "true" ]]; then
 fi
 
 echo "launching VM:"
-printf '  %q' "${QEMU_CMD[@]}"
+printf '  %q' "${QEMU_CMD[@]}" # Print the full qemu command
 printf '\n'
 echo "once booted, SSH in with: ssh -p $ARG_SSH_PORT debian@localhost"
 if [[ -n "${SEED_ISO_ARG[*]}" ]]; then
     echo "note: first boot runs cloud-init, SSH may take 1-2 minutes to become available"
 fi
-echo "starting in 10 seconds..."
+echo "starting in 10 seconds..." # Sleep before starting to give the user a chance to read the output and cancel if something looks wrong
 sleep 10
 exec "${QEMU_CMD[@]}"
