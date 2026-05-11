@@ -14,6 +14,7 @@
 #include <linux/errno.h>
 #include <linux/mm.h>
 #include <linux/vmalloc.h>
+#include <linux/limits.h>
 
 /* grep for the following string in dmesg for debugging */
 #define HOST_IVSHMEM_NAME "host_ivshmem"
@@ -92,12 +93,34 @@ static int host_ivshmem_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
+static int host_ivshmem_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	struct host_ivshmem_backend *backend = file->private_data;
+	unsigned long len = vma->vm_end - vma->vm_start;
+
+	if (!backend)
+		return -ENODEV;
+
+	/*
+	 * Mapping must start at the beginning of the backend memory.
+	 * All users are expected to mmap the entire shared-memory region.
+	 */
+	if (vma->vm_pgoff != 0 || len != backend->size)
+		return -EINVAL;
+
+	if (!(vma->vm_flags & VM_SHARED))
+		return -EINVAL;
+
+	return remap_vmalloc_range(vma, backend->mem, 0);
+}
+
 /* Minimal file operations for testing the static backend */
 static const struct file_operations host_ivshmem_fops = {
 	.owner = THIS_MODULE,
 	.open = host_ivshmem_open,
 	.release = host_ivshmem_release,
 	.llseek = noop_llseek,
+	.mmap = host_ivshmem_mmap,
 };
 
 static int host_ivshmem_create_static_backend(void)
@@ -174,6 +197,7 @@ static int __init host_ivshmem_init(void)
 		return ret;
 
 	host_ivshmem_class = class_create(HOST_IVSHMEM_NAME);
+
 	if (IS_ERR(host_ivshmem_class)) {
 		ret = PTR_ERR(host_ivshmem_class);
 		unregister_chrdev_region(host_ivshmem_devt,
@@ -181,7 +205,7 @@ static int __init host_ivshmem_init(void)
 		goto err_unregister_chrdev;
 	}
 
-    ret = host_ivshmem_create_static_backend();
+	ret = host_ivshmem_create_static_backend();
 
 	if (ret)
 		goto err_destroy_class;
@@ -200,8 +224,8 @@ err_unregister_chrdev:
 
 static void __exit host_ivshmem_exit(void)
 {
-    host_ivshmem_destroy_static_backend();
-    class_destroy(host_ivshmem_class);
+	host_ivshmem_destroy_static_backend();
+	class_destroy(host_ivshmem_class);
 	unregister_chrdev_region(host_ivshmem_devt, HOST_IVSHMEM_MAX_DEVS);
 	pr_info("host_ivshmem: unloaded\n");
 }
