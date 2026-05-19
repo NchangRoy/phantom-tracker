@@ -5,36 +5,46 @@
 #include<sys/socket.h>
 #include<sys/un.h>
 #include"linkedlist.h"
+
 struct vcpu_t {
     int cpuIndex;
     int threadId;
 };
 
-void print_vcpu(void *data) {
-
+static void print_vcpu(void *data)
+{
     struct vcpu_t *v = (struct vcpu_t *)data;
-    if(v!=NULL){
-          printf("\ncpu=%d thread=%d\n",
-           v->cpuIndex,
-           v->threadId);
-    }
-  
+
+    if (v == NULL)
+        return;
+
+    printf("\ncpu=%d thread=%d\n", v->cpuIndex, v->threadId);
 }
 
 
-Node * extract_vcpu_info(char *query_result) {
-
-    const char *entry_key  = "{\"thread-id\": ";
-    const char *cpu_key    = "\"cpu-index\": ";
-
+/*
+ * Allocate head and return a pointer ... etc. etc.
+ * @query_result: define what query_result is.
+ * Return ... (define what you're returning).
+ */
+static Node *extract_vcpu_info(char *query_result)
+{
+    const char *entry_key = "{\"thread-id\": ";
+    const char *cpu_key = "\"cpu-index\": ";
     char *str = query_result;
+    struct Node *head;
 
-    struct Node * head=create_node(NULL);
+    head = create_node(NULL);
+    if (head == NULL) {
+        fprintf(stderr, "out of memory\n"); // TODO: improve error handling
+        return;
+    }
 
     while ((str = strstr(str, entry_key)) != NULL) {
-
+        struct vcpu_t *vcpu;
         int threadId = -1;
         int cpuIndex = -1;
+        char *cpu_ptr;
 
         // move after '{"thread-id": '
         str += strlen(entry_key);
@@ -43,15 +53,15 @@ Node * extract_vcpu_info(char *query_result) {
         sscanf(str, "%d", &threadId);
 
         // find cpu-index in same object
-        char *cpu_ptr = strstr(str, cpu_key);
-
+        cpu_ptr = strstr(str, cpu_key);
         if (cpu_ptr != NULL) {
-
             cpu_ptr += strlen(cpu_key);
 
             sscanf(cpu_ptr, "%d", &cpuIndex);
         }
-        struct vcpu_t * vcpu=(struct vcpu_t *)malloc(sizeof(struct vcpu_t));
+        
+        vcpu = (struct vcpu_t *)malloc(sizeof(*vcpu));
+        // TODO: out of memory handling / NULL pointer check.
       
         vcpu->threadId = threadId;
         vcpu->cpuIndex = cpuIndex;
@@ -59,28 +69,34 @@ Node * extract_vcpu_info(char *query_result) {
         push_back(&head, vcpu);
 
         printf("Thread ID: %d\n", threadId);
-
         printf("CPU Index: %d\n\n", cpuIndex);
     }
 
-    print_nodes(head, print_vcpu);
-    
     return head;
 }
 
-int main(int argc, char * argv[]) {
-    char * unix_socket=argv[1];
+#define BUFSIZE 4096
+
+int main(int argc, char *argv[])
+{
+    const char *cap = "{ \"execute\": \"qmp_capabilities\" }";
+    const char *cmd = "{ \"execute\": \"query-cpus-fast\" }";
+
+    char buff[BUFSIZE];
+    struct sockaddr_un addr = {};
+    struct Node *head;
+    char *unix_socket = argv[1];
+    
     int socketfd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (socketfd < 0) {
         perror("socket");
         exit(1);
     }
 
-    struct sockaddr_un addr;
-    memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
     strcpy(addr.sun_path, unix_socket);
 
+    // TODO: retry if connect fails?
     if (connect(socketfd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         perror("connect");
         exit(1);
@@ -88,31 +104,30 @@ int main(int argc, char * argv[]) {
 
     printf("Connected to socket\n");
 
-    char buff[4096];
+    // Read QMP greeting
     memset(buff, 0, sizeof(buff));
-
-    // 1. READ QMP greeting
-    read(socketfd, buff, sizeof(buff));
+    read(socketfd, buff, sizeof(buff)); // TODO: error handling
     printf("QMP greeting: %s\n", buff);
 
-    // 2. SEND handshake
-    const char *cap = "{ \"execute\": \"qmp_capabilities\" }";
-    write(socketfd, cap, strlen(cap));
+    // Send handshake
+    write(socketfd, cap, strlen(cap)); // TODO: error handling
 
+    // Reading handshake response
     memset(buff, 0, sizeof(buff));
-    read(socketfd, buff, sizeof(buff));
+    read(socketfd, buff, sizeof(buff)); // TODO: error handling
     printf("Handshake response: %s\n", buff);
 
-    // 3. QUERY STATUS
-    const char *cmd = "{ \"execute\": \"query-cpus-fast\" }";
-    write(socketfd, cmd, strlen(cmd));
+    // Query status
+    write(socketfd, cmd, strlen(cmd)); // TODO: error handling
 
+    // Read status
     memset(buff, 0, sizeof(buff));
-    read(socketfd, buff, sizeof(buff));
+    read(socketfd, buff, sizeof(buff)); // TODO: error handling
     printf("VM status: %s\n", buff);
-    extract_vcpu_info(buff);
 
+    // Print CPU information
+    head = extract_vcpu_info(buff);
+    print_nodes(head, print_vcpu);
+    
     return 0;
-
-
 }
