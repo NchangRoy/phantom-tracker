@@ -59,3 +59,8 @@ scripts/*.qcow2
 # Generated BPF headers
 vmlinux.h
 pvsched-ebpf/host/h2g_msg_timer_loader
+
+#image files
+scripts/*.qcow2
+
+
