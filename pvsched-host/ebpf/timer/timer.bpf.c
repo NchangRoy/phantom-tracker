@@ -76,56 +76,29 @@ static int timer_cb(void *map, __u32 *key, struct elem *val)
 
 static long callback_fn(struct bpf_map *map, const void *key, void *value, void *ctx)
 {   
-    char collection_buff[VM_NAME_LEN] = {};
-    char processing_buff[VM_NAME_LEN] = {};
-    int i = 0;
+    
     struct vm_t *vm;
     const char *vm_name;
-    void *collection_map_ptr, *processing_map_ptr;
+    
 
     vm_name = (const char *)key;
     vm = (struct vm_t *)value;
 
-    // copy vm_name safely
-    #pragma clang loop unroll(full)
-    for (i = 0; i < VM_NAME_LEN - 3; i++) {
-        char c = vm_name[i];
-        collection_buff[i] = c;
-        processing_buff[i] = c;
-        if (c == '\0')
-            break;
+    //swap is_collecting for the vm
+
+    if(vm->is_collecting){
+        // Currently storing in processing map (1), switch to collection map (0)
+        vm->collection_index = 0;
+        vm->is_collecting = 0;
     }
-
-    // append "_c" for collection buff
-    collection_buff[i] = '_';
-    collection_buff[i+1] = 'c';
-    collection_buff[i+2] = '\0';
-
-    // append "_p" for processing buff
-    processing_buff[i] = '_';
-    processing_buff[i+1] = 'p';
-    processing_buff[i+2] = '\0';
-
-    // get the map pointers for the collection and processing buffers
-    collection_map_ptr = bpf_map_lookup_elem(&map_registry, collection_buff);
-    if (!collection_map_ptr) {
-        bpf_printk("Error Opening collection buffer\n");
+    else{
+        // Currently storing in collection map (0), switch to processing map (1)
+        vm->processing_index = 0;
+        vm->is_collecting = 1;
     }
-
-    processing_map_ptr = bpf_map_lookup_elem(&map_registry, processing_buff);
-    if (!processing_map_ptr) {
-        bpf_printk("Error Opening processing buffer\n");
-    }
-
-    // swap the map entries in the map_registry (if supported)
-    if (collection_map_ptr && processing_map_ptr) {
-        bpf_map_update_elem(&map_registry, processing_buff, &collection_map_ptr, BPF_ANY);
-        bpf_map_update_elem(&map_registry, collection_buff, &processing_map_ptr, BPF_ANY);
-    }
-
-    // set the processing index to the collection index and reinitialize the collection index
-    vm->processing_index = vm->collection_index;
-    vm->collection_index = 0;
+    
+    
+   
         
     return 0;
 }

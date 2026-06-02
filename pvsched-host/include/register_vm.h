@@ -50,6 +50,7 @@ static inline int register_vm(struct Node *vcpus, const char *vm_name,
 	vm->phantom_count    = 0;
 	vm->collection_index = 0;
 	vm->processing_index = 0;
+	vm->is_collecting=0;
  
 	vm_fd = bpf_obj_get(PIN_VMS);
     if (vm_fd < 0) {

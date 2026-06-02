@@ -10,6 +10,8 @@ struct vm_t {
     __u32 phantom_count;
     __u32 collection_index;
     __u32 processing_index;
+    __u32 is_collecting;
+    
 };
 
 struct vcpu_t {
