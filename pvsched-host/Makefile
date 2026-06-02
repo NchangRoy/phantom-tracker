@@ -57,8 +57,19 @@ include/create_maps.skel.h: bin/create_maps.bpf.o
 bin/create_maps.loader: include/create_maps.skel.h ebpf/create_maps/create_maps.loader.c
 	gcc ebpf/create_maps/create_maps.loader.c -o $@ $(BPF_CFLAGS) $(BPF_LDLIBS) $(BPF_INCLUDE)
 
+bin/timer.bpf.o: ebpf/timer/timer.bpf.c | bin include/vmlinux.h
+	clang -g -O2 -target bpf -c $< -o $@ $(BPF_INCLUDE)
+
+include/timer.skel.h: bin/timer.bpf.o
+	bpftool gen skeleton $< > $@
+
+bin/timer.loader: include/timer.skel.h ebpf/timer/timer.loader.c
+	gcc ebpf/timer/timer.loader.c -o $@ $(BPF_CFLAGS) $(BPF_LDLIBS) $(BPF_INCLUDE)
+
+timer: bin/timer.loader
+
 # eBPF meta target
-bpf: bin/create_maps.loader
+bpf: bin/create_maps.loader timer
 
 # ============================================================
 # ============================================================
@@ -85,4 +96,4 @@ run_bpf: bpf
 # ============================================================
 
 clean:
-	rm -rf bin include/create_maps.skel.h
+	rm -rf bin include/create_maps.skel.h include/timer.skel.h

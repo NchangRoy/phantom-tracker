@@ -10,9 +10,6 @@
 #include "create_maps.skel.h"
 #include "phantom_tracker.h"
 
-#define PIN_PATH_VMS		"/sys/fs/bpf/vms"
-#define PIN_PATH_VCPUS		"/sys/fs/bpf/vcpus"
-#define PIN_PATH_REGISTRY	"/sys/fs/bpf/map_registry"
 #define PIN_PATH_LINK		"/sys/fs/bpf/links/sched_switch_link"
 
 #define MAP_REGISTRY_MAX_ENTRIES	1000000
