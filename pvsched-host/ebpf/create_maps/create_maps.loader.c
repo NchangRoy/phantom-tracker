@@ -10,10 +10,15 @@
 #include "create_maps.skel.h"
 #include "phantom_tracker.h"
 
-#define PIN_PATH_LINK		"/sys/fs/bpf/links/sched_switch_link"
+#define PIN_PATH_LINK "/sys/fs/bpf/links/sched_switch_link"
 
-#define MAP_REGISTRY_MAX_ENTRIES	1000000
+#define MAP_REGISTRY_MAX_ENTRIES 1000000
 
+/*
+ * Inputs: None
+ * Outputs: Returns 0 on success, 1 on failure
+ * Description: Main entry point that sets up the BPF maps (inner map for registry, reuses pinned maps), loads the programs, and pins them for persistence across execution
+ */
 int main(void)
 {
 	struct create_maps_bpf *skel;
@@ -33,12 +38,9 @@ int main(void)
 	 * The fd is only used as a template; ownership transfers to the
 	 * skeleton after set_inner_map_fd().
 	 */
-	inner_fd = bpf_map_create(BPF_MAP_TYPE_ARRAY,
-				  NULL,
-				  sizeof(__u32),
+	inner_fd = bpf_map_create(BPF_MAP_TYPE_ARRAY, NULL, sizeof(__u32),
 				  sizeof(struct phantom_count),
-				  MAP_REGISTRY_MAX_ENTRIES,
-				  NULL);
+				  MAP_REGISTRY_MAX_ENTRIES, NULL);
 	if (inner_fd < 0) {
 		perror("create inner map template");
 		goto cleanup_skel;
@@ -74,7 +76,8 @@ int main(void)
 	registry_fd = bpf_obj_get(PIN_PATH_REGISTRY);
 	if (registry_fd >= 0) {
 		printf("reusing pinned map_registry map\n");
-		if (bpf_map__reuse_fd(skel->maps.map_registry, registry_fd) < 0) {
+		if (bpf_map__reuse_fd(skel->maps.map_registry, registry_fd) <
+		    0) {
 			perror("reuse map_registry map");
 			goto cleanup_inner;
 		}
@@ -101,7 +104,8 @@ int main(void)
 	 * Pin maps only when they were not already pinned.
 	 */
 	if (vms_fd < 0) {
-		if (bpf_obj_pin(bpf_map__fd(skel->maps.vms), PIN_PATH_VMS) < 0) {
+		if (bpf_obj_pin(bpf_map__fd(skel->maps.vms), PIN_PATH_VMS) <
+		    0) {
 			perror("pin vms");
 			goto cleanup_link;
 		}
@@ -109,7 +113,8 @@ int main(void)
 	}
 
 	if (vcpus_fd < 0) {
-		if (bpf_obj_pin(bpf_map__fd(skel->maps.vcpus), PIN_PATH_VCPUS) < 0) {
+		if (bpf_obj_pin(bpf_map__fd(skel->maps.vcpus), PIN_PATH_VCPUS) <
+		    0) {
 			perror("pin vcpus");
 			goto cleanup_link;
 		}

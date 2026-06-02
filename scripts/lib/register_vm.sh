@@ -56,6 +56,20 @@ echo "Connecting to vm socket $VM_SOCKET"
 # Optional: give loader time to initialize maps and attach probes
 sleep 1
 
+# Start the ebpf timer in the background
+# This is expected to:
+#   - load a timer program for periodically calculating the phantom average
+
+ sudo ./../pvsched-host/bin/timer.loader 
+
+sleep 1
+
+#ping lo interface to start timer
+
+ping -c 2 localhost
+
+
+
 
 # ------------------------------------------------------------
 # VM registration phase

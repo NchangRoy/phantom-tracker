@@ -28,7 +28,8 @@ struct create_maps_bpf {
 	} links;
 
 #ifdef __cplusplus
-	static inline struct create_maps_bpf *open(const struct bpf_object_open_opts *opts = nullptr);
+	static inline struct create_maps_bpf *
+	open(const struct bpf_object_open_opts *opts = nullptr);
 	static inline struct create_maps_bpf *open_and_load();
 	static inline int load(struct create_maps_bpf *skel);
 	static inline int attach(struct create_maps_bpf *skel);
@@ -38,8 +39,7 @@ struct create_maps_bpf {
 #endif /* __cplusplus */
 };
 
-static void
-create_maps_bpf__destroy(struct create_maps_bpf *obj)
+static void create_maps_bpf__destroy(struct create_maps_bpf *obj)
 {
 	if (!obj)
 		return;
@@ -48,8 +48,7 @@ create_maps_bpf__destroy(struct create_maps_bpf *obj)
 	free(obj);
 }
 
-static inline int
-create_maps_bpf__create_skeleton(struct create_maps_bpf *obj);
+static inline int create_maps_bpf__create_skeleton(struct create_maps_bpf *obj);
 
 static inline struct create_maps_bpf *
 create_maps_bpf__open_opts(const struct bpf_object_open_opts *opts)
@@ -78,20 +77,17 @@ err_out:
 	return NULL;
 }
 
-static inline struct create_maps_bpf *
-create_maps_bpf__open(void)
+static inline struct create_maps_bpf *create_maps_bpf__open(void)
 {
 	return create_maps_bpf__open_opts(NULL);
 }
 
-static inline int
-create_maps_bpf__load(struct create_maps_bpf *obj)
+static inline int create_maps_bpf__load(struct create_maps_bpf *obj)
 {
 	return bpf_object__load_skeleton(obj->skeleton);
 }
 
-static inline struct create_maps_bpf *
-create_maps_bpf__open_and_load(void)
+static inline struct create_maps_bpf *create_maps_bpf__open_and_load(void)
 {
 	struct create_maps_bpf *obj;
 	int err;
@@ -108,29 +104,26 @@ create_maps_bpf__open_and_load(void)
 	return obj;
 }
 
-static inline int
-create_maps_bpf__attach(struct create_maps_bpf *obj)
+static inline int create_maps_bpf__attach(struct create_maps_bpf *obj)
 {
 	return bpf_object__attach_skeleton(obj->skeleton);
 }
 
-static inline void
-create_maps_bpf__detach(struct create_maps_bpf *obj)
+static inline void create_maps_bpf__detach(struct create_maps_bpf *obj)
 {
 	bpf_object__detach_skeleton(obj->skeleton);
 }
 
 static inline const void *create_maps_bpf__elf_bytes(size_t *sz);
 
-static inline int
-create_maps_bpf__create_skeleton(struct create_maps_bpf *obj)
+static inline int create_maps_bpf__create_skeleton(struct create_maps_bpf *obj)
 {
 	struct bpf_object_skeleton *s;
 	struct bpf_map_skeleton *map __attribute__((unused));
 	int err;
 
 	s = (struct bpf_object_skeleton *)calloc(1, sizeof(*s));
-	if (!s)	{
+	if (!s) {
 		err = -ENOMEM;
 		goto err;
 	}
@@ -142,8 +135,8 @@ create_maps_bpf__create_skeleton(struct create_maps_bpf *obj)
 	/* maps */
 	s->map_cnt = 3;
 	s->map_skel_sz = 24;
-	s->maps = (struct bpf_map_skeleton *)calloc(s->map_cnt,
-			sizeof(*s->maps) > 24 ? sizeof(*s->maps) : 24);
+	s->maps = (struct bpf_map_skeleton *)calloc(
+		s->map_cnt, sizeof(*s->maps) > 24 ? sizeof(*s->maps) : 24);
 	if (!s->maps) {
 		err = -ENOMEM;
 		goto err;
@@ -164,7 +157,8 @@ create_maps_bpf__create_skeleton(struct create_maps_bpf *obj)
 	/* programs */
 	s->prog_cnt = 2;
 	s->prog_skel_sz = sizeof(*s->progs);
-	s->progs = (struct bpf_prog_skeleton *)calloc(s->prog_cnt, s->prog_skel_sz);
+	s->progs = (struct bpf_prog_skeleton *)calloc(s->prog_cnt,
+						      s->prog_skel_sz);
 	if (!s->progs) {
 		err = -ENOMEM;
 		goto err;
@@ -1078,13 +1072,35 @@ static inline const void *create_maps_bpf__elf_bytes(size_t *sz)
 }
 
 #ifdef __cplusplus
-struct create_maps_bpf *create_maps_bpf::open(const struct bpf_object_open_opts *opts) { return create_maps_bpf__open_opts(opts); }
-struct create_maps_bpf *create_maps_bpf::open_and_load() { return create_maps_bpf__open_and_load(); }
-int create_maps_bpf::load(struct create_maps_bpf *skel) { return create_maps_bpf__load(skel); }
-int create_maps_bpf::attach(struct create_maps_bpf *skel) { return create_maps_bpf__attach(skel); }
-void create_maps_bpf::detach(struct create_maps_bpf *skel) { create_maps_bpf__detach(skel); }
-void create_maps_bpf::destroy(struct create_maps_bpf *skel) { create_maps_bpf__destroy(skel); }
-const void *create_maps_bpf::elf_bytes(size_t *sz) { return create_maps_bpf__elf_bytes(sz); }
+struct create_maps_bpf *
+create_maps_bpf::open(const struct bpf_object_open_opts *opts)
+{
+	return create_maps_bpf__open_opts(opts);
+}
+struct create_maps_bpf *create_maps_bpf::open_and_load()
+{
+	return create_maps_bpf__open_and_load();
+}
+int create_maps_bpf::load(struct create_maps_bpf *skel)
+{
+	return create_maps_bpf__load(skel);
+}
+int create_maps_bpf::attach(struct create_maps_bpf *skel)
+{
+	return create_maps_bpf__attach(skel);
+}
+void create_maps_bpf::detach(struct create_maps_bpf *skel)
+{
+	create_maps_bpf__detach(skel);
+}
+void create_maps_bpf::destroy(struct create_maps_bpf *skel)
+{
+	create_maps_bpf__destroy(skel);
+}
+const void *create_maps_bpf::elf_bytes(size_t *sz)
+{
+	return create_maps_bpf__elf_bytes(sz);
+}
 #endif /* __cplusplus */
 
 __attribute__((unused)) static void

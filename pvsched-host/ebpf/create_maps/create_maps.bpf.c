@@ -8,208 +8,218 @@ char LICENSE[] SEC("license") = "GPL";
 // map containing all vms
 
 struct {
-  __uint(type, BPF_MAP_TYPE_HASH);
-  __uint(max_entries, 10000000);
-  __type(key, char[VM_NAME_LEN]); // vm name
-  __type(value, struct vm_t);
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 10000000);
+	__type(key, char[VM_NAME_LEN]); // vm name
+	__type(value, struct vm_t);
 } vms SEC(".maps");
 
 // map containing all vcpus
 struct {
-  __uint(type, BPF_MAP_TYPE_HASH);
-  __uint(max_entries, 10000000);
-  __type(key, __u32); // thread id
-  __type(value, struct vcpu_t);
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 10000000);
+	__type(key, __u32); // thread id
+	__type(value, struct vcpu_t);
 } vcpus SEC(".maps");
 
 // map containing collection and processing maps
 
 struct {
-  __uint(type, BPF_MAP_TYPE_HASH_OF_MAPS);
-  __uint(max_entries, 1024);
-  __type(key, char[VM_NAME_LEN]);
-  __type(value, __u32); // index into inner map array
+	__uint(type, BPF_MAP_TYPE_HASH_OF_MAPS);
+	__uint(max_entries, 1024);
+	__type(key, char[VM_NAME_LEN]);
+	__type(value, __u32); // index into inner map array
 } map_registry SEC(".maps");
 
+/*
+ * Inputs: ctx - context containing sched_switch tracepoint data including prev and next pids
+ * Outputs: Returns 0
+ * Description: Tracepoint handler for sched_switch. Increments phantom count on outgoing vCPUs and decrements on incoming vCPUs, records timestamps and updates collection/processing buffers
+ */
 SEC("tp/sched/sched_switch")
-int handle_switch(struct trace_event_raw_sched_switch *ctx) {
+int handle_switch(struct trace_event_raw_sched_switch *ctx)
+{
+	__u32 cpu;
+	__u32 incoming_process, outgoing_process;
+	__u64 ts;
+	struct vcpu_t *vcpu;
+	struct vm_t *vm;
+	char collection_buff[VM_NAME_LEN] = {};
+	char processing_buff[VM_NAME_LEN] = {};
+	int i = 0;
+	__u32 idx;
+	struct phantom_count count = {};
+	void *collection_map_ptr, *processing_map_ptr;
 
-  __u32 cpu;
-  __u32 incoming_process,outgoing_process;
-  __u64 ts;
-  struct vcpu_t *vcpu;
-  struct vm_t *vm;
-  char collection_buff[VM_NAME_LEN] = {};
-  char processing_buff[VM_NAME_LEN] = {};
-  int i = 0;
-  __u32 idx;
-  struct phantom_count count = {};
-  void *collection_map_ptr, *processing_map_ptr;
+	ts = bpf_ktime_get_ns();
 
-  ts = bpf_ktime_get_ns();
+	incoming_process = ctx->next_pid;
+	outgoing_process = ctx->prev_pid;
 
-  incoming_process = ctx->next_pid;
-  outgoing_process = ctx->prev_pid;
+	vcpu = bpf_map_lookup_elem(&vcpus, &incoming_process);
 
+	if (vcpu != NULL) {
+		// increment phantom count
+		vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
 
-  vcpu = bpf_map_lookup_elem(&vcpus, &incoming_process);
+		// bpf_printk("Entering here because of vcpu %d\n",vcpu->vcpu_index);
+		if (vm != NULL) {
+			__sync_fetch_and_add(&vm->phantom_count, -1);
+			// bpf_printk(" %llu ns on cpu %d phantom count %d \n",
+			// ts,cpu,vm->phantom_count);
 
-  if (vcpu != NULL) {
+#pragma clang loop unroll(full)
+			for (i = 0; i < VM_NAME_LEN - 3; i++) {
+				char c = vcpu->vm_name[i];
+				collection_buff[i] = c;
+				processing_buff[i] = c;
+				if (c == '\0')
+					break;
+			}
 
-    // increment phantom count
-    vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
+			// append "_c" for collection buff
+			collection_buff[i] = '_';
+			collection_buff[i + 1] = 'c';
+			collection_buff[i + 2] = '\0';
 
-    // bpf_printk("Entering here because of vcpu %d\n",vcpu->vcpu_index);
-    if (vm != NULL) {
-      __sync_fetch_and_add(&vm->phantom_count, -1);
-      // bpf_printk(" %llu ns on cpu %d phantom count %d \n",
-      // ts,cpu,vm->phantom_count);
+			// append "_p" for processing buff
+			processing_buff[i] = '_';
+			processing_buff[i + 1] = 'p';
+			processing_buff[i + 2] = '\0';
 
-    #pragma clang loop unroll(full)
-      for (i = 0; i < VM_NAME_LEN - 3; i++) {
-        char c = vcpu->vm_name[i];
-        collection_buff[i] = c;
-        processing_buff[i] = c;
-        if (c == '\0')
-          break;
-      }
+			// get the map pointers for the collection and processing buffers
+			collection_map_ptr = bpf_map_lookup_elem(
+				&map_registry, collection_buff);
+			if (!collection_map_ptr) {
+				bpf_printk("Error Opening collection buffer\n");
+			}
 
-      // append "_c" for collection buff
-      collection_buff[i] = '_';
-      collection_buff[i + 1] = 'c';
-      collection_buff[i + 2] = '\0';
+			processing_map_ptr = bpf_map_lookup_elem(
+				&map_registry, processing_buff);
+			if (!processing_map_ptr) {
+				bpf_printk("Error Opening processing buffer\n");
+			}
 
-      // append "_p" for processing buff
-      processing_buff[i] = '_';
-      processing_buff[i + 1] = 'p';
-      processing_buff[i + 2] = '\0';
+			//decrement phantom count
+			if (vm->is_collecting == 1) {
+				// use collection map (is_collecting == 1)
+				collection_map_ptr = bpf_map_lookup_elem(
+					&map_registry, collection_buff);
+				if (collection_map_ptr != NULL) {
+					idx = vm->collection_index;
 
-      // get the map pointers for the collection and processing buffers
-      collection_map_ptr = bpf_map_lookup_elem(&map_registry, collection_buff);
-      if (!collection_map_ptr) {
-        bpf_printk("Error Opening collection buffer\n");
-      }
+					count.timestamp = bpf_ktime_get_ns();
+					count.count = vm->phantom_count;
 
-      processing_map_ptr = bpf_map_lookup_elem(&map_registry, processing_buff);
-      if (!processing_map_ptr) {
-        bpf_printk("Error Opening processing buffer\n");
-      }
+					bpf_map_update_elem(collection_map_ptr,
+							    &idx, &count,
+							    BPF_ANY);
 
-      //decrement phantom count
-      if (vm->is_collecting == 1) {
-        // use collection map (is_collecting == 1)
-        collection_map_ptr =
-            bpf_map_lookup_elem(&map_registry, collection_buff);
-        if (collection_map_ptr != NULL) {
-          idx = vm->collection_index;
-          
+					__sync_fetch_and_add(
+						&vm->collection_index, 1);
+				}
+			} else {
+				// use processing map (is_collecting == 0)
+				processing_map_ptr = bpf_map_lookup_elem(
+					&map_registry, processing_buff);
+				if (processing_map_ptr != NULL) {
+					idx = vm->processing_index;
 
-          count.timestamp = bpf_ktime_get_ns();
-          count.count = vm->phantom_count;
+					count.timestamp = bpf_ktime_get_ns();
+					count.count = vm->phantom_count;
 
-          bpf_map_update_elem(collection_map_ptr, &idx, &count, BPF_ANY);
+					bpf_map_update_elem(processing_map_ptr,
+							    &idx, &count,
+							    BPF_ANY);
+					__sync_fetch_and_add(
+						&vm->processing_index, 1);
+				}
+			}
+		}
+	}
 
-          __sync_fetch_and_add(&vm->collection_index, 1);
-        }
-      } else {
-        // use processing map (is_collecting == 0)
-        processing_map_ptr =
-            bpf_map_lookup_elem(&map_registry, processing_buff);
-        if (processing_map_ptr != NULL) {
-          idx = vm->processing_index;
-          
+	//logic if vcpu is outgoing
 
-          count.timestamp = bpf_ktime_get_ns();
-          count.count = vm->phantom_count;
+	vcpu = bpf_map_lookup_elem(&vcpus, &outgoing_process);
 
-          bpf_map_update_elem(processing_map_ptr, &idx, &count, BPF_ANY);
-          __sync_fetch_and_add(&vm->processing_index, 1);
-        }
-      }
-    }
-  }
+	if (vcpu != NULL) {
+		// increment phantom count
+		vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
 
+		// bpf_printk("Entering here because of vcpu %d\n",vcpu->vcpu_index);
+		if (vm != NULL) {
+			__sync_fetch_and_add(&vm->phantom_count, 1);
+			// bpf_printk(" %llu ns on cpu %d phantom count %d \n",
+			// ts,cpu,vm->phantom_count);
 
-  //logic if vcpu is outgoing
+#pragma clang loop unroll(full)
+			for (i = 0; i < VM_NAME_LEN - 3; i++) {
+				char c = vcpu->vm_name[i];
+				collection_buff[i] = c;
+				processing_buff[i] = c;
+				if (c == '\0')
+					break;
+			}
 
+			// append "_c" for collection buff
+			collection_buff[i] = '_';
+			collection_buff[i + 1] = 'c';
+			collection_buff[i + 2] = '\0';
 
-  vcpu = bpf_map_lookup_elem(&vcpus, &outgoing_process);
+			// append "_p" for processing buff
+			processing_buff[i] = '_';
+			processing_buff[i + 1] = 'p';
+			processing_buff[i + 2] = '\0';
 
-  if (vcpu != NULL) {
+			// get the map pointers for the collection and processing buffers
+			collection_map_ptr = bpf_map_lookup_elem(
+				&map_registry, collection_buff);
+			if (!collection_map_ptr) {
+				bpf_printk("Error Opening collection buffer\n");
+			}
 
-    // increment phantom count
-    vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
+			processing_map_ptr = bpf_map_lookup_elem(
+				&map_registry, processing_buff);
+			if (!processing_map_ptr) {
+				bpf_printk("Error Opening processing buffer\n");
+			}
+			//increment phantom count
+			if (vm->is_collecting == 1) {
+				// use collection map (is_collecting == 1)
+				collection_map_ptr = bpf_map_lookup_elem(
+					&map_registry, collection_buff);
+				if (collection_map_ptr != NULL) {
+					idx = vm->collection_index;
 
-    // bpf_printk("Entering here because of vcpu %d\n",vcpu->vcpu_index);
-    if (vm != NULL) {
-      __sync_fetch_and_add(&vm->phantom_count, 1);
-      // bpf_printk(" %llu ns on cpu %d phantom count %d \n",
-      // ts,cpu,vm->phantom_count);
+					count.timestamp = bpf_ktime_get_ns();
+					count.count = vm->phantom_count;
 
-    #pragma clang loop unroll(full)
-      for (i = 0; i < VM_NAME_LEN - 3; i++) {
-        char c = vcpu->vm_name[i];
-        collection_buff[i] = c;
-        processing_buff[i] = c;
-        if (c == '\0')
-          break;
-      }
+					bpf_map_update_elem(collection_map_ptr,
+							    &idx, &count,
+							    BPF_ANY);
 
-      // append "_c" for collection buff
-      collection_buff[i] = '_';
-      collection_buff[i + 1] = 'c';
-      collection_buff[i + 2] = '\0';
+					__sync_fetch_and_add(
+						&vm->collection_index, 1);
+				}
+			} else {
+				// use processing map (is_collecting == 0)
+				processing_map_ptr = bpf_map_lookup_elem(
+					&map_registry, processing_buff);
+				if (processing_map_ptr != NULL) {
+					idx = vm->processing_index;
 
-      // append "_p" for processing buff
-      processing_buff[i] = '_';
-      processing_buff[i + 1] = 'p';
-      processing_buff[i + 2] = '\0';
+					count.timestamp = bpf_ktime_get_ns();
+					count.count = vm->phantom_count;
 
-      // get the map pointers for the collection and processing buffers
-      collection_map_ptr = bpf_map_lookup_elem(&map_registry, collection_buff);
-      if (!collection_map_ptr) {
-        bpf_printk("Error Opening collection buffer\n");
-      }
+					bpf_map_update_elem(processing_map_ptr,
+							    &idx, &count,
+							    BPF_ANY);
+					__sync_fetch_and_add(
+						&vm->processing_index, 1);
+				}
+			}
+		}
+	}
 
-      processing_map_ptr = bpf_map_lookup_elem(&map_registry, processing_buff);
-      if (!processing_map_ptr) {
-        bpf_printk("Error Opening processing buffer\n");
-      }
-      //increment phantom count
-      if (vm->is_collecting == 1) {
-        // use collection map (is_collecting == 1)
-        collection_map_ptr =
-            bpf_map_lookup_elem(&map_registry, collection_buff);
-        if (collection_map_ptr != NULL) {
-          idx = vm->collection_index;
-          
-
-          count.timestamp = bpf_ktime_get_ns();
-          count.count = vm->phantom_count;
-
-          bpf_map_update_elem(collection_map_ptr, &idx, &count, BPF_ANY);
-
-          __sync_fetch_and_add(&vm->collection_index, 1);
-        }
-      } else {
-        // use processing map (is_collecting == 0)
-        processing_map_ptr =
-            bpf_map_lookup_elem(&map_registry, processing_buff);
-        if (processing_map_ptr != NULL) {
-          idx = vm->processing_index;
-          
-
-          count.timestamp = bpf_ktime_get_ns();
-          count.count = vm->phantom_count;
-
-          bpf_map_update_elem(processing_map_ptr, &idx, &count, BPF_ANY);
-          __sync_fetch_and_add(&vm->processing_index, 1);
-        }
-      }
-    }
-  }
-
-
-  return 0;
+	return 0;
 }
-

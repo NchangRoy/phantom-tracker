@@ -20,7 +20,8 @@ struct register_vm_bpf {
 	} maps;
 
 #ifdef __cplusplus
-	static inline struct register_vm_bpf *open(const struct bpf_object_open_opts *opts = nullptr);
+	static inline struct register_vm_bpf *
+	open(const struct bpf_object_open_opts *opts = nullptr);
 	static inline struct register_vm_bpf *open_and_load();
 	static inline int load(struct register_vm_bpf *skel);
 	static inline int attach(struct register_vm_bpf *skel);
@@ -30,8 +31,7 @@ struct register_vm_bpf {
 #endif /* __cplusplus */
 };
 
-static void
-register_vm_bpf__destroy(struct register_vm_bpf *obj)
+static void register_vm_bpf__destroy(struct register_vm_bpf *obj)
 {
 	if (!obj)
 		return;
@@ -40,8 +40,7 @@ register_vm_bpf__destroy(struct register_vm_bpf *obj)
 	free(obj);
 }
 
-static inline int
-register_vm_bpf__create_skeleton(struct register_vm_bpf *obj);
+static inline int register_vm_bpf__create_skeleton(struct register_vm_bpf *obj);
 
 static inline struct register_vm_bpf *
 register_vm_bpf__open_opts(const struct bpf_object_open_opts *opts)
@@ -70,20 +69,17 @@ err_out:
 	return NULL;
 }
 
-static inline struct register_vm_bpf *
-register_vm_bpf__open(void)
+static inline struct register_vm_bpf *register_vm_bpf__open(void)
 {
 	return register_vm_bpf__open_opts(NULL);
 }
 
-static inline int
-register_vm_bpf__load(struct register_vm_bpf *obj)
+static inline int register_vm_bpf__load(struct register_vm_bpf *obj)
 {
 	return bpf_object__load_skeleton(obj->skeleton);
 }
 
-static inline struct register_vm_bpf *
-register_vm_bpf__open_and_load(void)
+static inline struct register_vm_bpf *register_vm_bpf__open_and_load(void)
 {
 	struct register_vm_bpf *obj;
 	int err;
@@ -100,29 +96,26 @@ register_vm_bpf__open_and_load(void)
 	return obj;
 }
 
-static inline int
-register_vm_bpf__attach(struct register_vm_bpf *obj)
+static inline int register_vm_bpf__attach(struct register_vm_bpf *obj)
 {
 	return bpf_object__attach_skeleton(obj->skeleton);
 }
 
-static inline void
-register_vm_bpf__detach(struct register_vm_bpf *obj)
+static inline void register_vm_bpf__detach(struct register_vm_bpf *obj)
 {
 	bpf_object__detach_skeleton(obj->skeleton);
 }
 
 static inline const void *register_vm_bpf__elf_bytes(size_t *sz);
 
-static inline int
-register_vm_bpf__create_skeleton(struct register_vm_bpf *obj)
+static inline int register_vm_bpf__create_skeleton(struct register_vm_bpf *obj)
 {
 	struct bpf_object_skeleton *s;
 	struct bpf_map_skeleton *map __attribute__((unused));
 	int err;
 
 	s = (struct bpf_object_skeleton *)calloc(1, sizeof(*s));
-	if (!s)	{
+	if (!s) {
 		err = -ENOMEM;
 		goto err;
 	}
@@ -134,8 +127,8 @@ register_vm_bpf__create_skeleton(struct register_vm_bpf *obj)
 	/* maps */
 	s->map_cnt = 2;
 	s->map_skel_sz = 24;
-	s->maps = (struct bpf_map_skeleton *)calloc(s->map_cnt,
-			sizeof(*s->maps) > 24 ? sizeof(*s->maps) : 24);
+	s->maps = (struct bpf_map_skeleton *)calloc(
+		s->map_cnt, sizeof(*s->maps) > 24 ? sizeof(*s->maps) : 24);
 	if (!s->maps) {
 		err = -ENOMEM;
 		goto err;
@@ -322,13 +315,35 @@ static inline const void *register_vm_bpf__elf_bytes(size_t *sz)
 }
 
 #ifdef __cplusplus
-struct register_vm_bpf *register_vm_bpf::open(const struct bpf_object_open_opts *opts) { return register_vm_bpf__open_opts(opts); }
-struct register_vm_bpf *register_vm_bpf::open_and_load() { return register_vm_bpf__open_and_load(); }
-int register_vm_bpf::load(struct register_vm_bpf *skel) { return register_vm_bpf__load(skel); }
-int register_vm_bpf::attach(struct register_vm_bpf *skel) { return register_vm_bpf__attach(skel); }
-void register_vm_bpf::detach(struct register_vm_bpf *skel) { register_vm_bpf__detach(skel); }
-void register_vm_bpf::destroy(struct register_vm_bpf *skel) { register_vm_bpf__destroy(skel); }
-const void *register_vm_bpf::elf_bytes(size_t *sz) { return register_vm_bpf__elf_bytes(sz); }
+struct register_vm_bpf *
+register_vm_bpf::open(const struct bpf_object_open_opts *opts)
+{
+	return register_vm_bpf__open_opts(opts);
+}
+struct register_vm_bpf *register_vm_bpf::open_and_load()
+{
+	return register_vm_bpf__open_and_load();
+}
+int register_vm_bpf::load(struct register_vm_bpf *skel)
+{
+	return register_vm_bpf__load(skel);
+}
+int register_vm_bpf::attach(struct register_vm_bpf *skel)
+{
+	return register_vm_bpf__attach(skel);
+}
+void register_vm_bpf::detach(struct register_vm_bpf *skel)
+{
+	register_vm_bpf__detach(skel);
+}
+void register_vm_bpf::destroy(struct register_vm_bpf *skel)
+{
+	register_vm_bpf__destroy(skel);
+}
+const void *register_vm_bpf::elf_bytes(size_t *sz)
+{
+	return register_vm_bpf__elf_bytes(sz);
+}
 #endif /* __cplusplus */
 
 __attribute__((unused)) static void
