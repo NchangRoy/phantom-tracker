@@ -1,8 +1,8 @@
-#include "phantom_tracker.h"
-#include "register_vm_bpf.h"
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
+#include "phantom_tracker.h"
+#include "register_vm_bpf.h"
 char LICENSE[] SEC("license") = "GPL";
 
 // map containing all vms
@@ -64,7 +64,7 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx) {
       // bpf_printk(" %llu ns on cpu %d phantom count %d \n",
       // ts,cpu,vm->phantom_count);
 
-#pragma clang loop unroll(full)
+    #pragma clang loop unroll(full)
       for (i = 0; i < VM_NAME_LEN - 3; i++) {
         char c = vcpu->vm_name[i];
         collection_buff[i] = c;
@@ -94,30 +94,34 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx) {
         bpf_printk("Error Opening processing buffer\n");
       }
 
-      if (vm->is_collecting) {
-        // use collection map
+      if (vm->is_collecting == 1) {
+        // use collection map (is_collecting == 1)
         collection_map_ptr =
             bpf_map_lookup_elem(&map_registry, collection_buff);
         if (collection_map_ptr != NULL) {
           idx = vm->collection_index;
-          __sync_fetch_and_add(&vm->collection_index, 1);
+          
 
           count.timestamp = bpf_ktime_get_ns();
           count.count = vm->phantom_count;
 
           bpf_map_update_elem(collection_map_ptr, &idx, &count, BPF_ANY);
+
+          __sync_fetch_and_add(&vm->collection_index, 1);
         }
       } else {
+        // use processing map (is_collecting == 0)
         processing_map_ptr =
             bpf_map_lookup_elem(&map_registry, processing_buff);
         if (processing_map_ptr != NULL) {
-          idx = vm->collection_index;
-          __sync_fetch_and_add(&vm->collection_index, 1);
+          idx = vm->processing_index;
+          
 
           count.timestamp = bpf_ktime_get_ns();
           count.count = vm->phantom_count;
 
           bpf_map_update_elem(processing_map_ptr, &idx, &count, BPF_ANY);
+          __sync_fetch_and_add(&vm->processing_index, 1);
         }
       }
     }
@@ -174,13 +178,13 @@ int handle_wakeup(struct trace_event_raw_sched_wakeup_template *ctx) {
       processing_buff[i + 1] = 'p';
       processing_buff[i + 2] = '\0';
 
-      if (vm->is_collecting) {
-        // use collection map
+      if (vm->is_collecting == 1) {
+        // use collection map (is_collecting == 1)
         collection_map_ptr =
             bpf_map_lookup_elem(&map_registry, collection_buff);
         if (collection_map_ptr != NULL) {
           idx = vm->collection_index;
-          __sync_fetch_and_add(&vm->collection_index, -1);
+          __sync_fetch_and_add(&vm->collection_index, 1);
 
           count.timestamp = bpf_ktime_get_ns();
           count.count = vm->phantom_count;
@@ -188,11 +192,12 @@ int handle_wakeup(struct trace_event_raw_sched_wakeup_template *ctx) {
           bpf_map_update_elem(collection_map_ptr, &idx, &count, BPF_ANY);
         }
       } else {
+        // use processing map (is_collecting == 0)
         processing_map_ptr =
             bpf_map_lookup_elem(&map_registry, processing_buff);
         if (processing_map_ptr != NULL) {
-          idx = vm->collection_index;
-          __sync_fetch_and_add(&vm->collection_index, -1);
+          idx = vm->processing_index;
+          __sync_fetch_and_add(&vm->processing_index, 1);
 
           count.timestamp = bpf_ktime_get_ns();
           count.count = vm->phantom_count;
