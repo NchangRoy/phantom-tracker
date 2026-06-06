@@ -179,7 +179,7 @@ static int timer_cb(void *map, __u32 *key, struct elem *val)
 		&callback_fn;
 	bpf_for_each_map_elem(&vms, cb_p, NULL, 0);
 
-	bpf_timer_start(&val->timer, 1000000000ULL, 0);
+	bpf_timer_start(&val->timer, 4000000ULL, 0);
 	return 0;
 }
 

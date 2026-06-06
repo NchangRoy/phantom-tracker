@@ -154,7 +154,7 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 
 		// bpf_printk("Entering here because of vcpu %d\n",vcpu->vcpu_index);
 		if (vm != NULL) {
-			bpf_printk("phantom count before increment: %d\n", vm->phantom_count);
+			//bpf_printk("phantom count before increment: %d\n", vm->phantom_count);
 			__sync_fetch_and_add(&vm->phantom_count, 1);
 			// bpf_printk(" %llu ns on cpu %d phantom count %d \n",
 			// ts,cpu,vm->phantom_count);
