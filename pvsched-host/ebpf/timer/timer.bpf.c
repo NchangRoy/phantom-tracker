@@ -86,6 +86,11 @@ static long phantom_avg_cb(struct bpf_map *map, const void *key, void *value,
 			(struct phantom_count *)value;
 		if (!tick_start_time_sample)
 			return 0;
+		/* Drop out-of-order: cross-CPU races can assign a later index
+		 * an earlier timestamp, causing unsigned wrap on subtraction.
+		 */
+		if (current_sample->timestamp < tick_start_time_sample->timestamp)
+			return 0;
 		count = current_sample->count;
 		duration = current_sample->timestamp -
 			   tick_start_time_sample->timestamp;
@@ -99,7 +104,9 @@ static long phantom_avg_cb(struct bpf_map *map, const void *key, void *value,
 			(struct phantom_count *)value;
 		if (!tick_end_time_sample)
 			return 0;
-
+		/* Drop out-of-order */
+		if (tick_end_time_sample->timestamp < current_sample->timestamp)
+			return 0;
 		count = current_sample->count;
 		duration = tick_end_time_sample->timestamp -
 			   current_sample->timestamp;
@@ -111,6 +118,9 @@ static long phantom_avg_cb(struct bpf_map *map, const void *key, void *value,
 		struct phantom_count *current_sample =
 			(struct phantom_count *)value;
 		if (!next_sample)
+			return 0;
+		/* Drop out-of-order */
+		if (next_sample->timestamp < current_sample->timestamp)
 			return 0;
 		count = current_sample->count;
 		duration = next_sample->timestamp - current_sample->timestamp;
