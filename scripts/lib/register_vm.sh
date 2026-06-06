@@ -59,6 +59,9 @@ sleep 1
 # Start the ebpf timer in the background
 # This is expected to:
 #   - load a timer program for periodically calculating the phantom average
+# Kill any previously running timer to avoid two timers racing on the same maps
+sudo pkill -f timer.loader || true
+sleep 0.5
  sudo ./../pvsched-host/bin/timer.loader &
 
 sleep 1

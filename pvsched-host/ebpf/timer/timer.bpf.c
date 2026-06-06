@@ -40,10 +40,10 @@ struct {
 // map containing collection and processing maps
 
 struct phantom_avg_ctx {
-	__u64 sum;
+	__s64 sum;
 	__u64 total_time;
 	int nb_samples;
-	__u64 avg;
+	__s64 avg;
 };
 
 struct {
@@ -69,7 +69,7 @@ static long phantom_avg_cb(struct bpf_map *map, const void *key, void *value,
 {
 	struct phantom_avg_ctx *data = (struct phantom_avg_ctx *)ctx;
 	__u64 duration = 0;
-	__u64 val = 0;
+	__s32 count = 0;
 	__u32 k = *(__u32 *)key;
 
 	// Only process valid intermediate samples
@@ -86,12 +86,12 @@ static long phantom_avg_cb(struct bpf_map *map, const void *key, void *value,
 			(struct phantom_count *)value;
 		if (!tick_start_time_sample)
 			return 0;
-		val = current_sample->count;
+		count = current_sample->count;
 		duration = current_sample->timestamp -
 			   tick_start_time_sample->timestamp;
 
 	} else if (k == data->nb_samples - 1) {
-		// process lastvalid  sample
+		// process last valid sample
 		__u32 end_key = data->nb_samples;
 		struct phantom_count *tick_end_time_sample =
 			bpf_map_lookup_elem(map, &end_key);
@@ -100,7 +100,7 @@ static long phantom_avg_cb(struct bpf_map *map, const void *key, void *value,
 		if (!tick_end_time_sample)
 			return 0;
 
-		val = current_sample->count;
+		count = current_sample->count;
 		duration = tick_end_time_sample->timestamp -
 			   current_sample->timestamp;
 
@@ -112,11 +112,17 @@ static long phantom_avg_cb(struct bpf_map *map, const void *key, void *value,
 			(struct phantom_count *)value;
 		if (!next_sample)
 			return 0;
-		val = current_sample->count;
+		count = current_sample->count;
 		duration = next_sample->timestamp - current_sample->timestamp;
 	}
 
-	data->sum += (val * duration);
+	/* Clamp negative counts from stale map data before multiplying.
+	 * A negative count cast to __u64 would overflow the weighted sum.
+	 */
+	if (count < 0)
+		count = 0;
+
+	data->sum += ((__s64)count * (__s64)duration);
 	data->total_time += duration;
 
 	return 0;
@@ -128,7 +134,7 @@ static long phantom_avg_cb(struct bpf_map *map, const void *key, void *value,
  * Outputs: Returns the calculated phantom average
  * Description: Iterates over the map samples to calculate and return the weighted average
  */
-static __u64 phantom_average(void *map_ptr, int nb_samples)
+static __s64 phantom_average(void *map_ptr, int nb_samples)
 {
 	struct phantom_avg_ctx ctx;
 	ctx.nb_samples = nb_samples;
@@ -254,9 +260,9 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 		nb_samples = vm->processing_index;
 		map_to_use = processing_map_ptr;
 	}
-	__u64 avg = phantom_average(map_to_use, nb_samples);
+	__s64 avg = phantom_average(map_to_use, nb_samples);
 
-	bpf_printk("Phantom average is %llu\n", avg);
+	bpf_printk("Phantom average is %lld\n", avg);
 	return 0;
 }
 
