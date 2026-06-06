@@ -59,14 +59,13 @@ sleep 1
 # Start the ebpf timer in the background
 # This is expected to:
 #   - load a timer program for periodically calculating the phantom average
-
- #sudo ./../pvsched-host/bin/timer.loader 
+ sudo ./../pvsched-host/bin/timer.loader &
 
 sleep 1
 
 #ping lo interface to start timer
-
 ping -c 2 localhost
+
 
 
 
