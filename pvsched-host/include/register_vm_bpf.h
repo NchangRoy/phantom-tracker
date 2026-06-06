@@ -1,3 +1,4 @@
+
 // include/register_vm_shared.h
 #ifndef REGISTER_VM_BPF_H
 #define REGISTER_VM_BPF_H
@@ -6,7 +7,7 @@
 
 struct vm_t {
 	char qmp_socket[128];
-	__u32 phantom_count;
+	__s32 phantom_count;
 	__u32 collection_index;
 	__u32 processing_index;
 	__u32 is_collecting;

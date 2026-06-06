@@ -64,7 +64,13 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 
 		// bpf_printk("Entering here because of vcpu %d\n",vcpu->vcpu_index);
 		if (vm != NULL) {
-			__sync_fetch_and_add(&vm->phantom_count, -1);
+			/* Decrement, but clamp at 0.
+			 * If phantom_count is 0 the vCPU was already running when
+			 * register_vm populated the map, so we missed the initial
+			 * outgoing event. Skip the decrement to avoid going negative.
+			 */
+			if (vm->phantom_count > 0)
+				__sync_fetch_and_add(&vm->phantom_count, -1);
 			// bpf_printk(" %llu ns on cpu %d phantom count %d \n",
 			// ts,cpu,vm->phantom_count);
 
@@ -148,6 +154,7 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 
 		// bpf_printk("Entering here because of vcpu %d\n",vcpu->vcpu_index);
 		if (vm != NULL) {
+			bpf_printk("phantom count before increment: %d\n", vm->phantom_count);
 			__sync_fetch_and_add(&vm->phantom_count, 1);
 			// bpf_printk(" %llu ns on cpu %d phantom count %d \n",
 			// ts,cpu,vm->phantom_count);

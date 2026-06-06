@@ -60,7 +60,7 @@ sleep 1
 # This is expected to:
 #   - load a timer program for periodically calculating the phantom average
 
- sudo ./../pvsched-host/bin/timer.loader 
+ #sudo ./../pvsched-host/bin/timer.loader 
 
 sleep 1
 
