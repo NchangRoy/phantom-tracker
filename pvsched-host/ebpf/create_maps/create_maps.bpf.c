@@ -38,17 +38,20 @@ struct {
  * Inputs: p - pointer to s32 value
  * Outputs: Returns the decremented value on success, or the value at p if <= 0 or if all retries failed
  * Description: Atomically decrements the value pointed to by p if it is positive.
- *              Uses a compare-and-swap (CAS) loop with up to 8 attempts to handle concurrency.
+ *              Casts the 32-bit pointer to 64-bit to perform a 64-bit compare-and-swap (CAS),
+ *              avoiding unsupported 32-bit CAS instructions in standard BPF targets.
  */
 static inline s32 atomic_dec_if_pos(s32 *p)
 {
 	for (int attempt = 0; attempt < 8; attempt++) {
-		s32 old = *(volatile s32 *)p;
-		if (old <= 0) {
-			return old;
+		s64 old_64 = *(volatile s64 *)p;
+		s32 old_32 = (s32)old_64;
+		if (old_32 <= 0) {
+			return old_32;
 		}
-		if (__sync_val_compare_and_swap(p, old, old - 1) == old) {
-			return old - 1;
+		s64 new_64 = old_64 - 1;
+		if (__sync_val_compare_and_swap((s64 *)p, old_64, new_64) == old_64) {
+			return (s32)new_64;
 		}
 	}
 	return *(volatile s32 *)p;
