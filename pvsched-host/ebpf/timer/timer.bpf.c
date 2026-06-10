@@ -68,69 +68,33 @@ static long phantom_avg_cb(struct bpf_map *map, const void *key, void *value,
 			   void *ctx)
 {
 	struct phantom_avg_ctx *data = (struct phantom_avg_ctx *)ctx;
-	__u64 duration = 0;
-	__s32 count = 0;
 	__u32 k = *(__u32 *)key;
 
 	// Only process valid intermediate samples
-	if (k == 0 || k >= data->nb_samples) {
+	if (k >= data->nb_samples) {
 		return 0;
 	}
 
-	if (k == 1) {
-		// process first valid sample
-		__u32 zero_key = 0;
-		struct phantom_count *tick_start_time_sample =
-			bpf_map_lookup_elem(map, &zero_key);
-		struct phantom_count *current_sample =
-			(struct phantom_count *)value;
-		if (!tick_start_time_sample)
-			return 0;
-		/* Drop out-of-order: cross-CPU races can assign a later index
-		 * an earlier timestamp, causing unsigned wrap on subtraction.
-		 */
-		if (current_sample->timestamp < tick_start_time_sample->timestamp)
-			return 0;
-		count = current_sample->count;
-		duration = current_sample->timestamp -
-			   tick_start_time_sample->timestamp;
-
-	} else if (k == data->nb_samples - 1) {
-		// process last valid sample
-		__u32 end_key = data->nb_samples;
-		struct phantom_count *tick_end_time_sample =
-			bpf_map_lookup_elem(map, &end_key);
-		struct phantom_count *current_sample =
-			(struct phantom_count *)value;
-		if (!tick_end_time_sample)
-			return 0;
-		/* Drop out-of-order */
-		if (tick_end_time_sample->timestamp < current_sample->timestamp)
-			return 0;
-		count = current_sample->count;
-		duration = tick_end_time_sample->timestamp -
-			   current_sample->timestamp;
-
-	} else {
-		__u32 next_k = k + 1;
-		struct phantom_count *next_sample =
-			bpf_map_lookup_elem(map, &next_k);
-		struct phantom_count *current_sample =
-			(struct phantom_count *)value;
-		if (!next_sample)
-			return 0;
-		/* Drop out-of-order */
-		if (next_sample->timestamp < current_sample->timestamp)
-			return 0;
-		count = current_sample->count;
-		duration = next_sample->timestamp - current_sample->timestamp;
+	struct phantom_count *current_sample = (struct phantom_count *)value;
+	__u32 next_k = k + 1;
+	struct phantom_count *next_sample = bpf_map_lookup_elem(map, &next_k);
+	if (!next_sample) {
+		return 0;
 	}
 
-	/* Clamp negative counts from stale map data before multiplying.
-	 * A negative count cast to __u64 would overflow the weighted sum.
+	/* Drop out-of-order: cross-CPU races can assign a later index
+	 * an earlier timestamp, causing unsigned wrap on subtraction.
 	 */
-	if (count < 0)
+	if (next_sample->timestamp < current_sample->timestamp) {
+		return 0;
+	}
+
+	__s32 count = current_sample->count;
+	if (count < 0) {
 		count = 0;
+	}
+
+	__u64 duration = next_sample->timestamp - current_sample->timestamp;
 
 	data->sum += ((__s64)count * (__s64)duration);
 	data->total_time += duration;
@@ -241,33 +205,41 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 
 	if (vm->is_collecting == 1) {
 		// Currently storing in collection map (1), switch to processing map (0)
-		// Add time_end to old buffer (collection map)
-		bpf_map_update_elem(collection_map_ptr, &vm->collection_index,
-				    &count_end, BPF_ANY);
-
-		// Add time_start to new buffer (processing map) at index 0
+		// Write time_start to new buffer (processing map) at index 0
 		__u32 zero = 0;
 		bpf_map_update_elem(processing_map_ptr, &zero, &count_start,
 				    BPF_ANY);
 
 		vm->processing_index = 1; // start next samples at 1
-		vm->is_collecting = 0;
-		nb_samples = vm->collection_index;
+
+		// Swap is_collecting to 0 atomically so switch handlers start writing to processing map
+		__sync_val_compare_and_swap(&vm->is_collecting, 1, 0);
+
+		// Reserve index for count_end atomically in the old collection map
+		__u32 end_idx = __sync_fetch_and_add(&vm->collection_index, 1);
+		bpf_map_update_elem(collection_map_ptr, &end_idx,
+				    &count_end, BPF_ANY);
+
+		nb_samples = end_idx;
 		map_to_use = collection_map_ptr;
 	} else {
 		// Currently storing in processing map (0), switch to collection map (1)
-		// Add time_end to old buffer (processing map)
-		bpf_map_update_elem(processing_map_ptr, &vm->processing_index,
-				    &count_end, BPF_ANY);
-
-		// Add time_start to new buffer (collection map) at index 0
+		// Write time_start to new buffer (collection map) at index 0
 		__u32 zero = 0;
 		bpf_map_update_elem(collection_map_ptr, &zero, &count_start,
 				    BPF_ANY);
 
 		vm->collection_index = 1; // start next samples at 1
-		vm->is_collecting = 1;
-		nb_samples = vm->processing_index;
+
+		// Swap is_collecting to 1 atomically so switch handlers start writing to collection map
+		__sync_val_compare_and_swap(&vm->is_collecting, 0, 1);
+
+		// Reserve index for count_end atomically in the old processing map
+		__u32 end_idx = __sync_fetch_and_add(&vm->processing_index, 1);
+		bpf_map_update_elem(processing_map_ptr, &end_idx,
+				    &count_end, BPF_ANY);
+
+		nb_samples = end_idx;
 		map_to_use = processing_map_ptr;
 	}
 	__s64 avg = phantom_average(map_to_use, nb_samples);

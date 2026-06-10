@@ -131,13 +131,14 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 				bpf_printk("Error Opening processing buffer\n");
 			}
 
-			//decrement phantom count
-			if (vm->is_collecting == 1) {
+			// Read is_collecting using volatile to ensure we get the latest value
+			__u32 collecting = *(volatile __u32 *)&vm->is_collecting;
+			if (collecting == 1) {
 				// use collection map (is_collecting == 1)
 				collection_map_ptr = bpf_map_lookup_elem(
 					&map_registry, collection_buff);
 				if (collection_map_ptr != NULL) {
-					idx = vm->collection_index;
+					idx = __sync_fetch_and_add(&vm->collection_index, 1);
 
 					count.timestamp = bpf_ktime_get_ns();
 					count.count = vm->phantom_count;
@@ -145,16 +146,13 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 					bpf_map_update_elem(collection_map_ptr,
 							    &idx, &count,
 							    BPF_ANY);
-
-					__sync_fetch_and_add(
-						&vm->collection_index, 1);
 				}
 			} else {
 				// use processing map (is_collecting == 0)
 				processing_map_ptr = bpf_map_lookup_elem(
 					&map_registry, processing_buff);
 				if (processing_map_ptr != NULL) {
-					idx = vm->processing_index;
+					idx = __sync_fetch_and_add(&vm->processing_index, 1);
 
 					count.timestamp = bpf_ktime_get_ns();
 					count.count = vm->phantom_count;
@@ -162,8 +160,6 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 					bpf_map_update_elem(processing_map_ptr,
 							    &idx, &count,
 							    BPF_ANY);
-					__sync_fetch_and_add(
-						&vm->processing_index, 1);
 				}
 			}
 		}
@@ -215,13 +211,14 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 			if (!processing_map_ptr) {
 				bpf_printk("Error Opening processing buffer\n");
 			}
-			//increment phantom count
-			if (vm->is_collecting == 1) {
+			// Read is_collecting using volatile to ensure we get the latest value
+			__u32 collecting = *(volatile __u32 *)&vm->is_collecting;
+			if (collecting == 1) {
 				// use collection map (is_collecting == 1)
 				collection_map_ptr = bpf_map_lookup_elem(
 					&map_registry, collection_buff);
 				if (collection_map_ptr != NULL) {
-					idx = vm->collection_index;
+					idx = __sync_fetch_and_add(&vm->collection_index, 1);
 
 					count.timestamp = bpf_ktime_get_ns();
 					count.count = vm->phantom_count;
@@ -229,16 +226,13 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 					bpf_map_update_elem(collection_map_ptr,
 							    &idx, &count,
 							    BPF_ANY);
-
-					__sync_fetch_and_add(
-						&vm->collection_index, 1);
 				}
 			} else {
 				// use processing map (is_collecting == 0)
 				processing_map_ptr = bpf_map_lookup_elem(
 					&map_registry, processing_buff);
 				if (processing_map_ptr != NULL) {
-					idx = vm->processing_index;
+					idx = __sync_fetch_and_add(&vm->processing_index, 1);
 
 					count.timestamp = bpf_ktime_get_ns();
 					count.count = vm->phantom_count;
@@ -246,8 +240,6 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 					bpf_map_update_elem(processing_map_ptr,
 							    &idx, &count,
 							    BPF_ANY);
-					__sync_fetch_and_add(
-						&vm->processing_index, 1);
 				}
 			}
 		}
