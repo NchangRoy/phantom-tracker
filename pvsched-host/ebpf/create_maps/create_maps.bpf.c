@@ -31,6 +31,29 @@ struct {
 	__type(value, __u32); // index into inner map array
 } map_registry SEC(".maps");
 
+
+
+
+/*
+ * Inputs: p - pointer to s32 value
+ * Outputs: Returns the decremented value on success, or the value at p if <= 0 or if all retries failed
+ * Description: Atomically decrements the value pointed to by p if it is positive.
+ *              Uses a compare-and-swap (CAS) loop with up to 8 attempts to handle concurrency.
+ */
+static inline s32 atomic_dec_if_pos(s32 *p)
+{
+	for (int attempt = 0; attempt < 8; attempt++) {
+		s32 old = *(volatile s32 *)p;
+		if (old <= 0) {
+			return old;
+		}
+		if (__sync_val_compare_and_swap(p, old, old - 1) == old) {
+			return old - 1;
+		}
+	}
+	return *(volatile s32 *)p;
+}
+
 /*
  * Inputs: ctx - context containing sched_switch tracepoint data including prev and next pids
  * Outputs: Returns 0
@@ -69,8 +92,7 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 			 * register_vm populated the map, so we missed the initial
 			 * outgoing event. Skip the decrement to avoid going negative.
 			 */
-			if (vm->phantom_count > 0)
-				__sync_fetch_and_add(&vm->phantom_count, -1);
+			atomic_dec_if_pos(&vm->phantom_count);
 			// bpf_printk(" %llu ns on cpu %d phantom count %d \n",
 			// ts,cpu,vm->phantom_count);
 

@@ -15,7 +15,6 @@
 #
 # Expected usage:
 #   ./script.sh --socket=<vm_socket> --name=<vm_name>
-
 # Parse VM socket argument
 # Expected format: --socket=<vm_socket>
 if [[ "$1" == --socket=* ]]; then
@@ -26,7 +25,6 @@ else
     echo "Expected: --socket=<vm_socket>"
     exit 1
 fi
-
 # Parse VM name argument
 # Expected format: --name=<vm_name>
 if [[ "$2" == --name=* ]]; then
@@ -37,16 +35,11 @@ else
     echo "Expected: --name=<vm_name>"
     exit 1
 fi
-
-
 # ------------------------------------------------------------
 # Initialization phase
 # ------------------------------------------------------------
-
 echo "Creating maps..."
-
 echo "Connecting to vm socket $VM_SOCKET"
-
 # Start the eBPF loader in the background
 # This is expected to:
 #   - load BPF program into kernel
@@ -55,30 +48,26 @@ echo "Connecting to vm socket $VM_SOCKET"
  sudo ./../pvsched-host/bin/create_maps.loader 
 # Optional: give loader time to initialize maps and attach probes
 sleep 1
-
 # Start the ebpf timer in the background
 # This is expected to:
 #   - load a timer program for periodically calculating the phantom average
 # Kill any previously running timer to avoid two timers racing on the same maps
 sudo pkill -f timer.loader || true
 sleep 0.5
- sudo ./../pvsched-host/bin/timer.loader &
-
+TIMER_BIN="./../pvsched-host/bin/timer.loader"
+sudo "$TIMER_BIN" &
+timer_pid=$!
 sleep 1
-
+if ! sudo kill -0 "$timer_pid" 2>/dev/null; then
+    echo "error: timer.loader failed to stay running" >&2
+    exit 1
+fi
 #ping lo interface to start timer
 ping -c 2 localhost
-
-
-
-
-
 # ------------------------------------------------------------
 # VM registration phase
 # ------------------------------------------------------------
-
 echo -e "\nRegistering VM $VM_NAME..."
-
 # Run VM registration program:
 #   - communicates with QEMU via QMP socket
 #   - queries VM configuration
