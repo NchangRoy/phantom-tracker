@@ -80,16 +80,17 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 	vcpu = bpf_map_lookup_elem(&vcpus, &incoming_process);
 
 	if (vcpu != NULL) {
-		// increment phantom count
-		vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
+		if (__sync_bool_compare_and_swap(&vcpu->is_running, 0, 1)) {
+			// increment phantom count
+			vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
 
-		if (vm != NULL) {
-			/* Decrement, but clamp at 0.
-			 * If phantom_count is 0 the vCPU was already running when
-			 * register_vm populated the map, so we missed the initial
-			 * outgoing event. Skip the decrement to avoid going negative.
-			 */
-			new_count = atomic_dec_if_pos(&vm->phantom_count);
+			if (vm != NULL) {
+				/* Decrement, but clamp at 0.
+				 * If phantom_count is 0 the vCPU was already running when
+				 * register_vm populated the map, so we missed the initial
+				 * outgoing event. Skip the decrement to avoid going negative.
+				 */
+				new_count = atomic_dec_if_pos(&vm->phantom_count);
 
 #pragma clang loop unroll(full)
 			for (i = 0; i < VM_NAME_LEN - 3; i++) {
@@ -167,17 +168,19 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 			}
 		}
 	}
+}
 
 	//logic if vcpu is outgoing
 	vcpu = bpf_map_lookup_elem(&vcpus, &outgoing_process);
 
 	if (vcpu != NULL) {
-		// increment phantom count
-		vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
+		if (__sync_bool_compare_and_swap(&vcpu->is_running, 1, 0)) {
+			// increment phantom count
+			vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
 
-		if (vm != NULL) {
-			new_count =
-				__sync_fetch_and_add(&vm->phantom_count, 1) + 1;
+			if (vm != NULL) {
+				new_count =
+					__sync_fetch_and_add(&vm->phantom_count, 1) + 1;
 
 #pragma clang loop unroll(full)
 			for (i = 0; i < VM_NAME_LEN - 3; i++) {
@@ -255,6 +258,7 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 			}
 		}
 	}
+}
 
 	return 0;
 }
