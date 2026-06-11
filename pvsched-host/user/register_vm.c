@@ -10,7 +10,7 @@
 #include "linkedlist.h"
 #include "register_vm.h"
 
-#define QMP_BUFF_SIZE 4096
+#define QMP_BUFF_SIZE 65536
 #define QMP_CONNECT_RETRY_S 1
 
 /*
@@ -126,6 +126,35 @@ static int qmp_connect(const char *path)
 
 /*
  * Inputs: fd - file descriptor for the UNIX socket
+ *         buf - buffer to store the response
+ *         bufsz - size of the response buffer
+ * Outputs: Returns the number of characters read, or -1 on error
+ * Description: Reads characters from the socket until a newline is reached
+ */
+static ssize_t qmp_read_line(int fd, char *buf, size_t bufsz)
+{
+	size_t total = 0;
+	while (total < bufsz - 1) {
+		char c;
+		ssize_t n = read(fd, &c, 1);
+		if (n < 0) {
+			perror("read");
+			return -1;
+		}
+		if (n == 0) {
+			break;
+		}
+		buf[total++] = c;
+		if (c == '\n') {
+			break;
+		}
+	}
+	buf[total] = '\0';
+	return total;
+}
+
+/*
+ * Inputs: fd - file descriptor for the UNIX socket
  *         cmd - QMP command string to send
  *         buf - buffer to store the response
  *         bufsz - size of the response buffer
@@ -142,10 +171,7 @@ static int qmp_send_recv(int fd, const char *cmd, char *buf, size_t bufsz)
 		return -1;
 	}
 
-	memset(buf, 0, bufsz);
-	n = read(fd, buf, bufsz - 1);
-	if (n < 0) {
-		perror("read");
+	if (qmp_read_line(fd, buf, bufsz) < 0) {
 		return -1;
 	}
 
@@ -183,7 +209,7 @@ int main(int argc, char *argv[])
 
 	/* 1. Read QMP greeting */
 	memset(buff, 0, sizeof(buff));
-	if (read(sockfd, buff, sizeof(buff) - 1) < 0) {
+	if (qmp_read_line(sockfd, buff, sizeof(buff)) < 0) {
 		perror("read greeting");
 		goto cleanup_fd;
 	}

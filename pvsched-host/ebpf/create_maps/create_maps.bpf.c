@@ -124,13 +124,15 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 			}
 
 			// Read is_collecting using volatile to ensure we get the latest value
-			__u32 collecting = *(volatile __u32 *)&vm->is_collecting;
+			__u32 collecting =
+				*(volatile __u32 *)&vm->is_collecting;
 			if (collecting == 1) {
 				// use collection map (is_collecting == 1)
 				collection_map_ptr = bpf_map_lookup_elem(
 					&map_registry, collection_buff);
 				if (collection_map_ptr != NULL) {
-					idx = __sync_fetch_and_add(&vm->collection_index, 1);
+					idx = __sync_fetch_and_add(
+						&vm->collection_index, 1);
 
 					count.timestamp = bpf_ktime_get_ns();
 					count.count = new_count;
@@ -148,7 +150,8 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 				processing_map_ptr = bpf_map_lookup_elem(
 					&map_registry, processing_buff);
 				if (processing_map_ptr != NULL) {
-					idx = __sync_fetch_and_add(&vm->processing_index, 1);
+					idx = __sync_fetch_and_add(
+						&vm->processing_index, 1);
 
 					count.timestamp = bpf_ktime_get_ns();
 					count.count = new_count;
@@ -173,7 +176,8 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 		vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
 
 		if (vm != NULL) {
-			new_count = __sync_fetch_and_add(&vm->phantom_count, 1) + 1;
+			new_count =
+				__sync_fetch_and_add(&vm->phantom_count, 1) + 1;
 
 #pragma clang loop unroll(full)
 			for (i = 0; i < VM_NAME_LEN - 3; i++) {
@@ -208,13 +212,15 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 			}
 
 			// Read is_collecting using volatile to ensure we get the latest value
-			__u32 collecting = *(volatile __u32 *)&vm->is_collecting;
+			__u32 collecting =
+				*(volatile __u32 *)&vm->is_collecting;
 			if (collecting == 1) {
 				// use collection map (is_collecting == 1)
 				collection_map_ptr = bpf_map_lookup_elem(
 					&map_registry, collection_buff);
 				if (collection_map_ptr != NULL) {
-					idx = __sync_fetch_and_add(&vm->collection_index, 1);
+					idx = __sync_fetch_and_add(
+						&vm->collection_index, 1);
 
 					count.timestamp = bpf_ktime_get_ns();
 					count.count = new_count;
@@ -232,7 +238,8 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 				processing_map_ptr = bpf_map_lookup_elem(
 					&map_registry, processing_buff);
 				if (processing_map_ptr != NULL) {
-					idx = __sync_fetch_and_add(&vm->processing_index, 1);
+					idx = __sync_fetch_and_add(
+						&vm->processing_index, 1);
 
 					count.timestamp = bpf_ktime_get_ns();
 					count.count = new_count;
