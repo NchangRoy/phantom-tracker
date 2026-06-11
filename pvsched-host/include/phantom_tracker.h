@@ -6,7 +6,7 @@
 #define PIN_PATH_REGISTRY "/sys/fs/bpf/map_registry"
 
 struct phantom_count {
-	int count;
+	int64_t count;
 	uint64_t timestamp;
 };
 

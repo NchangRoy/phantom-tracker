@@ -47,7 +47,7 @@ include:
 
 
 bin/create_maps.bpf.o: ebpf/create_maps/create_maps.bpf.c | bin include/vmlinux.h
-	clang -g -O2 -target bpf -c $< -o $@ $(BPF_INCLUDE)
+	clang -g -O2 -target bpf -mcpu=v3 -c $< -o $@ $(BPF_INCLUDE)
 
 # Generate skeleton header from BPF object
 include/create_maps.skel.h: bin/create_maps.bpf.o
@@ -58,7 +58,7 @@ bin/create_maps.loader: include/create_maps.skel.h ebpf/create_maps/create_maps.
 	gcc ebpf/create_maps/create_maps.loader.c -o $@ $(BPF_CFLAGS) $(BPF_LDLIBS) $(BPF_INCLUDE)
 
 bin/timer.bpf.o: ebpf/timer/timer.bpf.c | bin include/vmlinux.h
-	clang -g -O2 -target bpf -c $< -o $@ $(BPF_INCLUDE)
+	clang -g -O2 -target bpf -mcpu=v3 -c $< -o $@ $(BPF_INCLUDE)
 
 include/timer.skel.h: bin/timer.bpf.o
 	bpftool gen skeleton $< > $@

@@ -3,10 +3,10 @@
 #include <bpf/bpf_tracing.h>
 #include "phantom_tracker.h"
 #include "register_vm_bpf.h"
+
 char LICENSE[] SEC("license") = "GPL";
 
 // map containing all vms
-
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 10000000);
@@ -23,7 +23,6 @@ struct {
 } vcpus SEC(".maps");
 
 // map containing collection and processing maps
-
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH_OF_MAPS);
 	__uint(max_entries, 1024);
@@ -31,30 +30,25 @@ struct {
 	__type(value, __u32); // index into inner map array
 } map_registry SEC(".maps");
 
-
-
-
 /*
- * Inputs: p - pointer to s32 value
+ * Inputs: p - pointer to s64 value
  * Outputs: Returns the decremented value on success, or the value at p if <= 0 or if all retries failed
  * Description: Atomically decrements the value pointed to by p if it is positive.
- *              Casts the 32-bit pointer to 64-bit to perform a 64-bit compare-and-swap (CAS),
- *              avoiding unsupported 32-bit CAS instructions in standard BPF targets.
+ *              Uses BPF 64-bit atomic compare-and-swap to ensure correct field-level atomicity.
  */
-static inline s32 atomic_dec_if_pos(s32 *p)
+static inline s64 atomic_dec_if_pos(s64 *p)
 {
 	for (int attempt = 0; attempt < 8; attempt++) {
-		s64 old_64 = *(volatile s64 *)p;
-		s32 old_32 = (s32)old_64;
-		if (old_32 <= 0) {
-			return old_32;
+		s64 old = *(volatile s64 *)p;
+		if (old <= 0) {
+			return old;
 		}
-		s64 new_64 = old_64 - 1;
-		if (__sync_val_compare_and_swap((s64 *)p, old_64, new_64) == old_64) {
-			return (s32)new_64;
+		s64 new = old - 1;
+		if (__sync_val_compare_and_swap(p, old, new) == old) {
+			return new;
 		}
 	}
-	return *(volatile s32 *)p;
+	return *(volatile s64 *)p;
 }
 
 /*
@@ -76,6 +70,7 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 	__u32 idx;
 	struct phantom_count count = {};
 	void *collection_map_ptr, *processing_map_ptr;
+	s64 new_count;
 
 	ts = bpf_ktime_get_ns();
 
@@ -88,16 +83,13 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 		// increment phantom count
 		vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
 
-		// bpf_printk("Entering here because of vcpu %d\n",vcpu->vcpu_index);
 		if (vm != NULL) {
 			/* Decrement, but clamp at 0.
 			 * If phantom_count is 0 the vCPU was already running when
 			 * register_vm populated the map, so we missed the initial
 			 * outgoing event. Skip the decrement to avoid going negative.
 			 */
-			atomic_dec_if_pos(&vm->phantom_count);
-			// bpf_printk(" %llu ns on cpu %d phantom count %d \n",
-			// ts,cpu,vm->phantom_count);
+			new_count = atomic_dec_if_pos(&vm->phantom_count);
 
 #pragma clang loop unroll(full)
 			for (i = 0; i < VM_NAME_LEN - 3; i++) {
@@ -141,11 +133,15 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 					idx = __sync_fetch_and_add(&vm->collection_index, 1);
 
 					count.timestamp = bpf_ktime_get_ns();
-					count.count = vm->phantom_count;
+					count.count = new_count;
 
 					bpf_map_update_elem(collection_map_ptr,
 							    &idx, &count,
 							    BPF_ANY);
+
+					bpf_printk(
+						"Updating collection dec map with count %lld at index %u\n",
+						count.count, idx);
 				}
 			} else {
 				// use processing map (is_collecting == 0)
@@ -155,30 +151,29 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 					idx = __sync_fetch_and_add(&vm->processing_index, 1);
 
 					count.timestamp = bpf_ktime_get_ns();
-					count.count = vm->phantom_count;
+					count.count = new_count;
 
 					bpf_map_update_elem(processing_map_ptr,
 							    &idx, &count,
 							    BPF_ANY);
+
+					bpf_printk(
+						"Updating processing dec map with count %lld at index %u\n",
+						count.count, idx);
 				}
 			}
 		}
 	}
 
 	//logic if vcpu is outgoing
-
 	vcpu = bpf_map_lookup_elem(&vcpus, &outgoing_process);
 
 	if (vcpu != NULL) {
 		// increment phantom count
 		vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
 
-		// bpf_printk("Entering here because of vcpu %d\n",vcpu->vcpu_index);
 		if (vm != NULL) {
-			//bpf_printk("phantom count before increment: %d\n", vm->phantom_count);
-			__sync_fetch_and_add(&vm->phantom_count, 1);
-			// bpf_printk(" %llu ns on cpu %d phantom count %d \n",
-			// ts,cpu,vm->phantom_count);
+			new_count = __sync_fetch_and_add(&vm->phantom_count, 1) + 1;
 
 #pragma clang loop unroll(full)
 			for (i = 0; i < VM_NAME_LEN - 3; i++) {
@@ -211,6 +206,7 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 			if (!processing_map_ptr) {
 				bpf_printk("Error Opening processing buffer\n");
 			}
+
 			// Read is_collecting using volatile to ensure we get the latest value
 			__u32 collecting = *(volatile __u32 *)&vm->is_collecting;
 			if (collecting == 1) {
@@ -221,11 +217,15 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 					idx = __sync_fetch_and_add(&vm->collection_index, 1);
 
 					count.timestamp = bpf_ktime_get_ns();
-					count.count = vm->phantom_count;
+					count.count = new_count;
 
 					bpf_map_update_elem(collection_map_ptr,
 							    &idx, &count,
 							    BPF_ANY);
+
+					bpf_printk(
+						"Updating collection map inc with count %lld at index %u\n",
+						count.count, idx);
 				}
 			} else {
 				// use processing map (is_collecting == 0)
@@ -235,11 +235,15 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 					idx = __sync_fetch_and_add(&vm->processing_index, 1);
 
 					count.timestamp = bpf_ktime_get_ns();
-					count.count = vm->phantom_count;
+					count.count = new_count;
 
 					bpf_map_update_elem(processing_map_ptr,
 							    &idx, &count,
 							    BPF_ANY);
+
+					bpf_printk(
+						"Updating processing map inc with count %lld at index %u\n",
+						count.count, idx);
 				}
 			}
 		}

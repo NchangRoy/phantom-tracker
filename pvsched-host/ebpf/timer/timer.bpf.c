@@ -89,7 +89,7 @@ static long phantom_avg_cb(struct bpf_map *map, const void *key, void *value,
 		return 0;
 	}
 
-	__s32 count = current_sample->count;
+	__s64 count = current_sample->count;
 	if (count < 0) {
 		count = 0;
 	}
