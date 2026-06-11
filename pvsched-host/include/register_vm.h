@@ -7,6 +7,7 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
@@ -23,6 +24,50 @@
 #define VM_MAP_MAX_ENTRIES 1000000
 #define VM_KEY_SUFFIX_C "_c"
 #define VM_KEY_SUFFIX_P "_p"
+
+static inline void cleanup_stale_vcpus(int vcpus_fd, const char *vm_name)
+{
+	__u32 key;
+	__u32 next_key;
+	int res;
+	__u32 *keys_to_delete = NULL;
+	int count = 0;
+	int capacity = 1024;
+
+	keys_to_delete = malloc(capacity * sizeof(__u32));
+	if (!keys_to_delete) {
+		perror("malloc keys_to_delete");
+		return;
+	}
+
+	res = bpf_map_get_next_key(vcpus_fd, NULL, &next_key);
+	while (res == 0) {
+		key = next_key;
+		struct vcpu_t vcpu;
+		if (bpf_map_lookup_elem(vcpus_fd, &key, &vcpu) == 0) {
+			if (strcmp(vcpu.vm_name, vm_name) == 0) {
+				if (count >= capacity) {
+					capacity *= 2;
+					__u32 *temp = realloc(keys_to_delete, capacity * sizeof(__u32));
+					if (!temp) {
+						perror("realloc keys_to_delete");
+						free(keys_to_delete);
+						return;
+					}
+					keys_to_delete = temp;
+				}
+				keys_to_delete[count++] = key;
+			}
+		}
+		res = bpf_map_get_next_key(vcpus_fd, &key, &next_key);
+	}
+
+	for (int i = 0; i < count; i++) {
+		bpf_map_delete_elem(vcpus_fd, &keys_to_delete[i]);
+	}
+
+	free(keys_to_delete);
+}
 
 /*
  * register_vm - write a VM and its vCPUs into the pinned BPF maps.
@@ -73,6 +118,9 @@ static inline int register_vm(struct Node *vcpus, const char *vm_name,
 		goto cleanup_vm_fd;
 	}
 
+	/* Clean up stale vCPU mappings for this VM name before adding new ones */
+	cleanup_stale_vcpus(vcpus_fd, vm_name);
+
 	memset(vm_key, 0, sizeof(vm_key));
 	strncpy(vm_key, vm_name, sizeof(vm_key) - 1);
 
@@ -97,6 +145,7 @@ static inline int register_vm(struct Node *vcpus, const char *vm_name,
 
 		strncpy(vcpu->vm_name, vm_name, sizeof(vcpu->vm_name) - 1);
 		vcpu->vcpu_index = qmp_detail->cpuIndex;
+		vcpu->is_running = 0;
 
 		key = (__u32)qmp_detail->threadId;
 
@@ -166,6 +215,7 @@ static inline int setup_vm_maps(const char *vm_name)
 
 	snprintf(pin_path, sizeof(pin_path), PIN_BASE "/%s/collection",
 		 vm_name);
+	unlink(pin_path);
 	if (bpf_obj_pin(collection, pin_path) < 0) {
 		perror("bpf_obj_pin collection");
 		goto cleanup_collection;
@@ -182,6 +232,7 @@ static inline int setup_vm_maps(const char *vm_name)
 
 	snprintf(pin_path, sizeof(pin_path), PIN_BASE "/%s/processing",
 		 vm_name);
+	unlink(pin_path);
 	if (bpf_obj_pin(processing, pin_path) < 0) {
 		perror("bpf_obj_pin processing");
 		goto cleanup_processing;
