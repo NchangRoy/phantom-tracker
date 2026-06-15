@@ -25,6 +25,7 @@ fi
 _DEPS_OK=1
 check_cmd qemu-system-x86_64 qemu-system-x86 fedora=qemu-kvm rhel=qemu-kvm centos=qemu-kvm almalinux=qemu-kvm rocky=qemu-kvm || _DEPS_OK=0
 check_cmd numactl             numactl                                                                                           || _DEPS_OK=0
+check_cmd bpftool             bpftool                                                                                           || _DEPS_OK=0
 [[ "$_DEPS_OK" -eq 1 ]] || exit 1
 
 declare_arg name           required "Name of the VM"
