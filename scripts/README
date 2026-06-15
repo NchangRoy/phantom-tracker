@@ -9,7 +9,7 @@ cloud images using cloud-init and run with KVM acceleration on x86_64 hosts.
 Quick start
 -----------
 
-    bash create_vm.sh --name=foo --ssh-pubkey=~/.ssh/id_xxxx.pub
+    bash create_vm.sh --name=foo --type=target --ssh-pubkey=~/.ssh/id_xxxx.pub
 
 On first run, this downloads the Debian 12 base image (~400 MB), creates a
 per-VM qcow2 overlay disk, generates a cloud-init seed ISO, and boots the VM.
@@ -37,6 +37,7 @@ create_vm.sh — arguments
 Required:
   --name=<name>         Name of the VM. Used for disk/ISO filenames and the
                         systemd scope. Allowed chars: letters, digits, . _ -
+  --type=<type>         VM type. Must be either target or noise.
   --ssh-pubkey=<path>   Path to an SSH public key file to inject into the VM.
 
 Optional:
@@ -73,12 +74,14 @@ Minimal VM, 2 vCPUs, 4G RAM:
 
     bash create_vm.sh \
         --name=foo \
+        --type=target \
         --ssh-pubkey=~/.ssh/id_ed25519.pub
 
 36-core VM pinned to NUMA node 0 with vsock:
 
     bash create_vm.sh \
         --name=bench \
+        --type=target \
         --ssh-pubkey=~/.ssh/id_ed25519.pub \
         --sockets=1 --cores=36 --threads=1 \
         --mem=45G \
@@ -88,7 +91,7 @@ Minimal VM, 2 vCPUs, 4G RAM:
 Re-provision a VM (delete its disk and seed ISO first):
 
     rm foo.qcow2 foo-seed.iso
-    bash create_vm.sh --name=foo --ssh-pubkey=~/.ssh/id_xxxx.pub
+    bash create_vm.sh --name=foo --type=target --ssh-pubkey=~/.ssh/id_xxxx.pub
 
 
 Library files (lib/)

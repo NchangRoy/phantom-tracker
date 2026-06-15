@@ -30,6 +30,7 @@ check_pkg_config libbpf       libbpf-dev fedora=libbpf-devel rhel=libbpf-devel c
 [[ "$_DEPS_OK" -eq 1 ]] || exit 1
 
 declare_arg name           required "Name of the VM"
+declare_arg type           required "VM type (target or noise)"
 declare_arg ssh-pubkey     required "Path to SSH public key file to inject into the VM"
 declare_arg password       optional "Password for the debian user (for console login)" debian
 declare_arg sockets        optional "Number of CPU sockets" 1
@@ -46,6 +47,11 @@ declare_arg pin-to-socket     optional "Pin VM to a specific NUMA node" false
 declare_arg socket-nr         optional "NUMA node number (required when --pin-to-socket=true)"
 
 parse_args "$@" # parse all space-separated args
+
+if [[ "$ARG_TYPE" != "target" && "$ARG_TYPE" != "noise" ]]; then
+    echo "error: --type must be either 'target' or 'noise'" >&2
+    exit 1
+fi
 
 # We use the same name for pvsched-shmem backends and VM names, so validate the name here before we do any work.
 if [[ ! "$ARG_NAME" =~ ^[a-zA-Z0-9._-]+$ ]]; then
@@ -80,6 +86,7 @@ fi
 
 # Print the effective configuration before launching the VM.
 echo "name: $ARG_NAME"
+echo "type: $ARG_TYPE"
 echo "pin-to-socket: $ARG_PIN_TO_SOCKET"
 echo "socket-nr: ${ARG_SOCKET_NR:-}"
 
