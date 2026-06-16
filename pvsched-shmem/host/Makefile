@@ -2,6 +2,8 @@ ifneq ($(KERNELRELEASE),)
 
 obj-m := host_ivshmem.o
 
+ccflags-y += -I$(src)/../../include
+
 else
 
 KERNELDIR ?= /lib/modules/$(shell uname -r)/build

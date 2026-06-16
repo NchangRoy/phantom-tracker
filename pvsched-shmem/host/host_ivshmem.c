@@ -15,6 +15,12 @@
 #include <linux/mm.h>
 #include <linux/vmalloc.h>
 #include <linux/limits.h>
+#include <linux/bpf.h>
+#include <linux/btf.h>
+#include <linux/btf_ids.h>
+#include <linux/string.h>
+
+#include "pvsched.h"
 
 /* grep for the following string in dmesg for debugging */
 #define HOST_IVSHMEM_NAME "host_ivshmem"
@@ -28,6 +34,8 @@
  *   page 1: guest-to-host communication
  */
 #define HOST_IVSHMEM_SIZE (2 * PAGE_SIZE)
+#define HOST_IVSHMEM_H2G_OFFSET 0UL
+#define HOST_IVSHMEM_G2H_OFFSET PAGE_SIZE
 
 /*
  * When we create a character device, userspace accesses it via a /dev node.
@@ -76,6 +84,63 @@ static struct host_ivshmem_backend backend = {
 	.size = HOST_IVSHMEM_SIZE,
 	.minor = 0,
 };
+
+static int host_ivshmem_validate_h2g_msg_index(u32 index)
+{
+	if (index >= NR_HOST_IVSHMEM_MSGS)
+		return -EINVAL;
+
+	return 0;
+}
+
+static int host_ivshmem_h2g_write_msg(struct host_ivshmem_backend *backend,
+				 u32 index, const struct hg_message *hg_msg)
+{
+	size_t offset;
+	char *h2g_page;
+	int ret;
+
+	if (!backend || !backend->mem)
+		return -ENODEV;
+
+	if (!hg_msg)
+		return -EINVAL;
+
+	ret = host_ivshmem_validate_h2g_msg_index(index);
+
+	if (ret)
+		return ret;
+
+	h2g_page = (char *) backend->mem + HOST_IVSHMEM_H2G_OFFSET;
+	offset = (size_t) index * HOST_IVSHMEM_MSG_SIZE;
+	memcpy(h2g_page + offset, hg_msg, HOST_IVSHMEM_MSG_SIZE);
+
+	return 0;
+}
+
+__bpf_kfunc_start_defs();
+
+__bpf_kfunc int bpf_host_ivshmem_h2g_write(u32 index,
+					const struct hg_message *hg_msg)
+{
+	return host_ivshmem_h2g_write_msg(&backend, index, hg_msg);
+}
+
+__bpf_kfunc_end_defs();
+
+BTF_KFUNCS_START(bpf_host_ivshmem_kfuncs)
+BTF_ID_FLAGS(func, bpf_host_ivshmem_h2g_write)
+BTF_KFUNCS_END(bpf_host_ivshmem_kfuncs)
+
+static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set  = {
+	.owner = THIS_MODULE,
+	.set = &bpf_host_ivshmem_kfuncs,
+};
+
+static int host_ivshmem_register_kfuncs(void)
+{
+	return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING, &bpf_host_ivshmem_kfunc_id_set);
+}
 
 static int host_ivshmem_open(struct inode *inode, struct file *file)
 {
@@ -178,20 +243,27 @@ static void host_ivshmem_destroy_static_backend(void)
 
 static int __init host_ivshmem_init(void)
 {
-    int ret;
+  int ret;
+	
+	/* Sanity check in case the user alters MSG_SIZE! */
+	if (PAGE_SIZE % HOST_IVSHMEM_MSG_SIZE) {
+			pr_err("host_ivshmem: PAGE_SIZE (%lu) is not a multiple of HOST_IVSHMEM_MSG_SIZE (%zu)\n",
+				PAGE_SIZE, HOST_IVSHMEM_MSG_SIZE);
+			return -EINVAL;
+		}
 
-    /* 
-     * Reserve a range of character-device numbers for this module.
-     * The kernel chooses a free major number for us and reserves
-     * HOST_IVSHMEM_MAX_DEVS minor numbers starting at 0.
-     * 
-     * Later, the per-VM ivshmem backends will use the minor numbers in this
-     * range, and userspace will access them via the corresponding
-     * /dev/host_ivshmem* nodes and manage them via /sys/class/host_ivshmem.
-     */
-    ret = alloc_chrdev_region(&host_ivshmem_devt, 0,
-				  HOST_IVSHMEM_MAX_DEVS,
-				  HOST_IVSHMEM_NAME);
+	/* 
+		* Reserve a range of character-device numbers for this module.
+		* The kernel chooses a free major number for us and reserves
+		* HOST_IVSHMEM_MAX_DEVS minor numbers starting at 0.
+		* 
+		* Later, the per-VM ivshmem backends will use the minor numbers in this
+		* range, and userspace will access them via the corresponding
+		* /dev/host_ivshmem* nodes and manage them via /sys/class/host_ivshmem.
+		*/
+	ret = alloc_chrdev_region(&host_ivshmem_devt, 0,
+				HOST_IVSHMEM_MAX_DEVS,
+				HOST_IVSHMEM_NAME);
 
 	if (ret)
 		return ret;
@@ -207,13 +279,25 @@ static int __init host_ivshmem_init(void)
 
 	ret = host_ivshmem_create_static_backend();
 
-	if (ret)
+	if (ret) {
+		pr_err("host_ivshmem: failed to create static backend: %d\n", ret);
 		goto err_destroy_class;
+	}
+
+	ret = host_ivshmem_register_kfuncs();
+
+	if (ret) {
+		pr_err("host_ivshmem: failed to register kfuncs: %d\n", ret);
+		goto err_destroy_backend;
+	}
 
 	pr_info("host_ivshmem: loaded major=%u\n",
 		MAJOR(host_ivshmem_devt));
+
 	return 0;
 
+err_destroy_backend:
+	host_ivshmem_destroy_static_backend();
 err_destroy_class:
 	class_destroy(host_ivshmem_class);
 	host_ivshmem_class = NULL;
