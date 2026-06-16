@@ -20,6 +20,7 @@
 #include <linux/btf_ids.h>
 #include <linux/string.h>
 
+#define PVSCHED_IVSHMEM_PAGE_SIZE PAGE_SIZE
 #include "pvsched.h"
 
 /* grep for the following string in dmesg for debugging */
@@ -33,9 +34,9 @@
  *   page 0: host-to-guest communication
  *   page 1: guest-to-host communication
  */
-#define HOST_IVSHMEM_SIZE (2 * PAGE_SIZE)
+#define HOST_IVSHMEM_SIZE (2 * PVSCHED_IVSHMEM_PAGE_SIZE)
 #define HOST_IVSHMEM_H2G_OFFSET 0UL
-#define HOST_IVSHMEM_G2H_OFFSET PAGE_SIZE
+#define HOST_IVSHMEM_G2H_OFFSET PVSCHED_IVSHMEM_PAGE_SIZE
 
 /*
  * When we create a character device, userspace accesses it via a /dev node.
