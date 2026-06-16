@@ -41,4 +41,7 @@ struct hg_message {
 	pvsched_u64 padding [7];
 };
 
+#define HOST_IVSHMEM_MSG_SIZE sizeof(struct hg_message)
+#define NR_HOST_IVSHMEM_MSGS (PAGE_SIZE / HOST_IVSHMEM_MSG_SIZE)
+
 #endif /* _PVSCHED_H */
