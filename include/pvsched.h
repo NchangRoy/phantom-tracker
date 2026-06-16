@@ -42,6 +42,12 @@ struct hg_message {
 };
 
 #define HOST_IVSHMEM_MSG_SIZE sizeof(struct hg_message)
-#define NR_HOST_IVSHMEM_MSGS (PAGE_SIZE / HOST_IVSHMEM_MSG_SIZE)
+
+#ifndef PVSCHED_IVSHMEM_PAGE_SIZE
+#error "PVSCHED_IVSHMEM_PAGE_SIZE must be defined by the Makefile for eBPF programs and by the .c file for the kernel module"
+#endif
+
+#define NR_HOST_IVSHMEM_MSGS \
+		(PVSCHED_IVSHMEM_PAGE_SIZE / HOST_IVSHMEM_MSG_SIZE)
 
 #endif /* _PVSCHED_H */
