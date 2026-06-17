@@ -19,6 +19,7 @@
 #include <linux/btf.h>
 #include <linux/btf_ids.h>
 #include <linux/string.h>
+#include <linux/debugfs.h>
 
 #define PVSCHED_IVSHMEM_PAGE_SIZE PAGE_SIZE
 #include "pvsched.h"
@@ -65,6 +66,19 @@ static dev_t host_ivshmem_devt;
 static struct class *host_ivshmem_class;
 
 /*
+ * Debugfs is a virtual filesystem mounted at /sys/kernel/debug, which exposes
+ * kernel objects to userspace as files and directories. This is useful for us
+ * to debug the contents written to the host_ivshmem device by the eBPF program.
+ *
+ * The following provides a common directory for this debugging at:
+ * /sys/kernel/debug/host_ivshmem/
+ *
+ * The driver should continue to work even if debugfs is unavailable, so failure
+ * to create this debugfs directory is not fatal.
+ */
+static struct dentry *host_ivshmem_debugfs_root;
+
+/*
  * One static ivshmem backend instance for initial testing.
  *
  * cdev  - Connects this backend to file_operations.
@@ -76,6 +90,8 @@ static struct class *host_ivshmem_class;
 struct host_ivshmem_backend {
 	struct cdev cdev;
 	struct device *dev;
+	struct dentry *debugfs_dentry;
+	struct debugfs_blob_wrapper debugfs_blob;
 	void *mem;
 	size_t size;
 	int minor;
@@ -209,10 +225,26 @@ static int host_ivshmem_create_static_backend(void)
 
 	backend.dev = device_create(host_ivshmem_class, NULL, devt, &backend,
 					    "host_ivshmem%d", backend.minor);
+
 	if (IS_ERR(backend.dev)) {
 		ret = PTR_ERR(backend.dev);
 		backend.dev = NULL;
 		goto err_del_cdev;
+	}
+
+	backend.debugfs_blob.data = backend.mem;
+	backend.debugfs_blob.size = backend.size;
+
+	if (host_ivshmem_debugfs_root) {
+		backend.debugfs_dentry = debugfs_create_blob("host_ivshmem_blob_vm0",
+							0400, host_ivshmem_debugfs_root,
+							&backend.debugfs_blob);
+
+		/* Even if debugfs blob creation fails, the device should still function */
+		if (IS_ERR_OR_NULL(backend.debugfs_dentry)) {
+			pr_warn("host_ivshmem: failed to create debugfs blob for vm0\n");
+			backend.debugfs_dentry = NULL;
+		}
 	}
 
 	pr_info("host_ivshmem: created /dev/host_ivshmem%d size=%zu\n",
@@ -230,6 +262,11 @@ err_free_mem:
 static void host_ivshmem_destroy_static_backend(void)
 {
 	dev_t devt = MKDEV(MAJOR(host_ivshmem_devt), backend.minor);
+
+	debugfs_remove(backend.debugfs_dentry);
+	backend.debugfs_dentry = NULL;
+	backend.debugfs_blob.data = NULL;
+	backend.debugfs_blob.size = 0;
 
 	if (backend.dev) {
 		device_destroy(host_ivshmem_class, devt);
@@ -271,6 +308,13 @@ static int __init host_ivshmem_init(void)
 
 	host_ivshmem_class = class_create(HOST_IVSHMEM_NAME);
 
+	host_ivshmem_debugfs_root = debugfs_create_dir(HOST_IVSHMEM_NAME, NULL);
+
+	if (IS_ERR_OR_NULL(host_ivshmem_debugfs_root)) {
+		pr_warn("host_ivshmem: failed to create debugfs directory\n");
+		host_ivshmem_debugfs_root = NULL;
+	}
+
 	if (IS_ERR(host_ivshmem_class)) {
 		ret = PTR_ERR(host_ivshmem_class);
 		unregister_chrdev_region(host_ivshmem_devt,
@@ -300,6 +344,8 @@ static int __init host_ivshmem_init(void)
 err_destroy_backend:
 	host_ivshmem_destroy_static_backend();
 err_destroy_class:
+	debugfs_remove_recursive(host_ivshmem_debugfs_root);
+	host_ivshmem_debugfs_root = NULL;
 	class_destroy(host_ivshmem_class);
 	host_ivshmem_class = NULL;
 err_unregister_chrdev:
@@ -310,6 +356,8 @@ err_unregister_chrdev:
 static void __exit host_ivshmem_exit(void)
 {
 	host_ivshmem_destroy_static_backend();
+	debugfs_remove_recursive(host_ivshmem_debugfs_root);
+	host_ivshmem_debugfs_root = NULL;
 	class_destroy(host_ivshmem_class);
 	unregister_chrdev_region(host_ivshmem_devt, HOST_IVSHMEM_MAX_DEVS);
 	pr_info("host_ivshmem: unloaded\n");
