@@ -24,9 +24,7 @@ fi
 # --- Dependency check ---
 _DEPS_OK=1
 check_cmd qemu-system-x86_64 qemu-system-x86 fedora=qemu-kvm rhel=qemu-kvm centos=qemu-kvm almalinux=qemu-kvm rocky=qemu-kvm || _DEPS_OK=0
-check_cmd numactl             numactl                                                                                           || _DEPS_OK=0
-check_cmd bpftool             bpftool                                                                                           || _DEPS_OK=0
-check_pkg_config libbpf       libbpf-dev fedora=libbpf-devel rhel=libbpf-devel centos=libbpf-devel almalinux=libbpf-devel rocky=libbpf-devel opensuse=libbpf-devel sles=libbpf-devel arch=libbpf alpine=libbpf-dev gentoo=libbpf nixos=libbpf || _DEPS_OK=0
+check_cmd numactl   numactl || _DEPS_OK=0
 
 [[ "$_DEPS_OK" -eq 1 ]] || exit 1
 
@@ -66,8 +64,17 @@ if [[ "$ARG_ADD_VSOCK" == "true" && -z "${ARG_VSOCK_CID:-}" ]]; then
     exit 1
 fi
 
-# We use ivshmem for host-guest shared memory for target VMs
+# We use ivshmem for host-guest shared memory and pass host-guest messages using eBPF for target VMs
 if [[ "$ARG_TYPE" == "target" ]]; then
+    check_pkg_config libbpf libbpf-dev fedora=libbpf-devel rhel=libbpf-devel centos=libbpf-devel almalinux=libbpf-devel rocky=libbpf-devel opensuse=libbpf-devel sles=libbpf-devel arch=libbpf alpine=libbpf-dev gentoo=libbpf nixos=libbpf || exit 1
+    check_cmd bpftool   bpftool || exit 1
+    if ! command -v bpf-gcc &>/dev/null && ! command -v bpf-unknown-none-gcc &>/dev/null; then
+        echo "error: required BPF compiler not found: bpf-gcc (or bpf-unknown-none-gcc)" >&2
+        echo "  install it with:" >&2
+        distro_install_hint gcc-bpf fedora=gcc-bpf rhel=gcc centos=gcc almalinux=gcc rocky=gcc opensuse=gcc13 sles=gcc13 arch=gcc alpine=gcc gentoo=sys-devel/gcc nixos=gcc >&2
+        exit 1
+    fi
+
     . "$(dirname "$0")/create_pvsched_shmem.sh"
     create_pvsched_shmem_setup
 
