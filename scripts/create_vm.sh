@@ -27,6 +27,16 @@ check_cmd qemu-system-x86_64 qemu-system-x86 fedora=qemu-kvm rhel=qemu-kvm cento
 check_cmd numactl             numactl                                                                                           || _DEPS_OK=0
 check_cmd bpftool             bpftool                                                                                           || _DEPS_OK=0
 check_pkg_config libbpf       libbpf-dev fedora=libbpf-devel rhel=libbpf-devel centos=libbpf-devel almalinux=libbpf-devel rocky=libbpf-devel opensuse=libbpf-devel sles=libbpf-devel arch=libbpf alpine=libbpf-dev gentoo=libbpf nixos=libbpf || _DEPS_OK=0
+
+# Require kernel headers for the currently running host kernel.
+KERNEL_RELEASE="$(uname -r)"
+if [[ ! -e "/lib/modules/$KERNEL_RELEASE/build" ]]; then
+    echo "error: required kernel headers are missing for running kernel: $KERNEL_RELEASE" >&2
+    echo "  install them with:" >&2
+    distro_install_hint "linux-headers-$KERNEL_RELEASE" fedora="kernel-devel-$KERNEL_RELEASE" rhel="kernel-devel-$KERNEL_RELEASE" centos="kernel-devel-$KERNEL_RELEASE" almalinux="kernel-devel-$KERNEL_RELEASE" rocky="kernel-devel-$KERNEL_RELEASE" opensuse="kernel-devel" sles="kernel-devel" arch=linux-headers alpine=linux-headers gentoo=sys-kernel/linux-headers nixos=linuxHeaders >&2
+    _DEPS_OK=0
+fi
+
 [[ "$_DEPS_OK" -eq 1 ]] || exit 1
 
 declare_arg name           required "Name of the VM"
