@@ -28,15 +28,6 @@ check_cmd numactl             numactl                                           
 check_cmd bpftool             bpftool                                                                                           || _DEPS_OK=0
 check_pkg_config libbpf       libbpf-dev fedora=libbpf-devel rhel=libbpf-devel centos=libbpf-devel almalinux=libbpf-devel rocky=libbpf-devel opensuse=libbpf-devel sles=libbpf-devel arch=libbpf alpine=libbpf-dev gentoo=libbpf nixos=libbpf || _DEPS_OK=0
 
-# Require kernel headers for the currently running host kernel.
-KERNEL_RELEASE="$(uname -r)"
-if [[ ! -e "/lib/modules/$KERNEL_RELEASE/build" ]]; then
-    echo "error: required kernel headers are missing for running kernel: $KERNEL_RELEASE" >&2
-    echo "  install them with:" >&2
-    distro_install_hint "linux-headers-$KERNEL_RELEASE" fedora="kernel-devel-$KERNEL_RELEASE" rhel="kernel-devel-$KERNEL_RELEASE" centos="kernel-devel-$KERNEL_RELEASE" almalinux="kernel-devel-$KERNEL_RELEASE" rocky="kernel-devel-$KERNEL_RELEASE" opensuse="kernel-devel" sles="kernel-devel" arch=linux-headers alpine=linux-headers gentoo=sys-kernel/linux-headers nixos=linuxHeaders >&2
-    _DEPS_OK=0
-fi
-
 [[ "$_DEPS_OK" -eq 1 ]] || exit 1
 
 declare_arg name           required "Name of the VM"
@@ -75,6 +66,36 @@ if [[ "$ARG_ADD_VSOCK" == "true" && -z "${ARG_VSOCK_CID:-}" ]]; then
     exit 1
 fi
 
+# We use ivshmem for host-guest shared memory for target VMs
+if [[ "$ARG_TYPE" == "target" ]]; then
+    . "$(dirname "$0")/create_pvsched_shmem.sh"
+    create_pvsched_shmem_setup
+
+    cleanup_target_pvsched_shmem() {
+        if ! create_pvsched_shmem_cleanup; then
+            echo "warning: failed to fully clean up host_ivshmem resources" >&2
+        fi
+    }
+
+    trap cleanup_target_pvsched_shmem EXIT
+fi
+
+IVSHMEM_QEMU_ARGS=()
+HOSTBACKEND_DEVICE=""
+if [[ "$ARG_TYPE" == "target" ]]; then
+    HOSTBACKEND_DEVICE="/dev/host_ivshmem0"
+    if grep -qE '^host_ivshmem[[:space:]]' /proc/modules && [[ -e "$HOSTBACKEND_DEVICE" ]]; then
+        IVSHMEM_QEMU_ARGS=(
+            -object "memory-backend-file,id=hostmem0,size=8192,share=on,mem-path=$HOSTBACKEND_DEVICE"
+            -device "ivshmem-plain,memdev=hostmem0"
+        )
+        echo "ivshmem: enabled host-backed shared memory via $HOSTBACKEND_DEVICE"
+    else
+        HOSTBACKEND_DEVICE=""
+        echo "warning: host_ivshmem is not ready (host backend device missing or module not loaded), skipping ivshmem device" >&2
+    fi
+fi
+
 # On multi-numa hosts, pinning a VM to a single numa-node is the standard practice, and we support this
 if [[ "$ARG_PIN_TO_SOCKET" == "true" && -z "${ARG_SOCKET_NR:-}" ]]; then
     echo "error: --socket-nr is required when --pin-to-socket is true" >&2
@@ -99,6 +120,9 @@ echo "name: $ARG_NAME"
 echo "type: $ARG_TYPE"
 echo "pin-to-socket: $ARG_PIN_TO_SOCKET"
 echo "socket-nr: ${ARG_SOCKET_NR:-}"
+if [[ "$ARG_TYPE" == "target" ]]; then
+    echo "hostbackend-device: ${HOSTBACKEND_DEVICE:-unavailable}"
+fi
 
 # --- Disk image ---
 DISK_IMG="${ARG_NAME}.qcow2"
@@ -133,6 +157,7 @@ QEMU_CMD=(
     -m "$ARG_MEM"
     -smp "$CPU_TOPOLOGY"
     -drive "file=$DISK_IMG,format=qcow2,if=virtio"
+    "${IVSHMEM_QEMU_ARGS[@]}"
     "${SEED_ISO_ARG[@]}"
     -net nic,model=virtio
     -net "user,hostfwd=tcp::${ARG_SSH_PORT}-:22"
@@ -175,4 +200,8 @@ if [[ -n "${SEED_ISO_ARG[*]}" ]]; then
 fi
 echo "starting in 10 seconds..." # Sleep before starting to give the user a chance to read the output and cancel if something looks wrong
 sleep 10
-exec "${QEMU_CMD[@]}"
+set +e
+"${QEMU_CMD[@]}"
+qemu_rc=$?
+set -e
+exit "$qemu_rc"
