@@ -42,7 +42,7 @@ struct {
  */
 static inline s64 atomic_dec_if_pos(s64 *p)
 {
-	for (int attempt = 0; attempt < 8; attempt++) {
+	for (int attempt = 0; attempt < 24; attempt++) {
 		s64 old = *(volatile s64 *)p;
 		if (old <= 0) {
 			return old;
