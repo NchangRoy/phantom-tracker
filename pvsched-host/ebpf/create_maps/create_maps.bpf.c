@@ -6,6 +6,10 @@
 
 char LICENSE[] SEC("license") = "GPL";
 
+#define TASK_RUNNING            0x00000000
+#define TASK_INTERRUPTIBLE      0x00000001
+#define TASK_UNINTERRUPTIBLE    0x00000002
+
 // map containing all vms
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
@@ -80,7 +84,9 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 	vcpu = bpf_map_lookup_elem(&vcpus, &incoming_process);
 
 	if (vcpu != NULL) {
-		if (__sync_bool_compare_and_swap(&vcpu->is_running, 0, 1)) {
+		//we only increment the phantom count if the task was runnable
+		
+		if (__sync_bool_compare_and_swap(&vcpu->is_phantom, 1, 0)) {
 			// increment phantom count
 			vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
 
@@ -172,9 +178,17 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 
 	//logic if vcpu is outgoing
 	vcpu = bpf_map_lookup_elem(&vcpus, &outgoing_process);
-
+	u64  prev_state=ctx->prev_state;
 	if (vcpu != NULL) {
-		if (__sync_bool_compare_and_swap(&vcpu->is_running, 1, 0)) {
+		if(prev_state==TASK_UNINTERRUPTIBLE || prev_state==TASK_INTERRUPTIBLE){
+			bpf_printk("VCPU sleeping...\n");
+		}
+
+
+		if(prev_state==TASK_RUNNING){
+			
+		
+		if (__sync_bool_compare_and_swap(&vcpu->is_phantom, 0, 1)) {
 			// increment phantom count
 			vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
 
@@ -259,6 +273,6 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 		}
 	}
 }
-
+}
 	return 0;
 }

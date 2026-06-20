@@ -97,6 +97,7 @@ int main(int argc, char *argv[])
 	struct sockaddr_un addr = {};
 	struct Node *head;
 	char *unix_socket = argv[1];
+	
 
 	int socketfd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (socketfd < 0) {

@@ -16,7 +16,7 @@ struct vm_t {
 struct vcpu_t {
 	__u32 vcpu_index;
 	char vm_name[VM_NAME_LEN];
-	__u32 is_running;
+	__u32 is_phantom;
 };
 
 struct qmp_vpcu {

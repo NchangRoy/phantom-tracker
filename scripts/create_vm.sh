@@ -105,7 +105,7 @@ CPU_TOPOLOGY="$TOTAL_VCPUS,sockets=$ARG_SOCKETS,cores=$ARG_CORES,threads=$ARG_TH
 QMP_SOCKET="/tmp/${ARG_NAME}-qmp.sock"
 #--start and pass qmp socket to  register_vm.sh 
 
-bash lib/register_vm.sh  --socket=$QMP_SOCKET --name=$ARG_NAME
+bash lib/register_vm.sh --socket=$QMP_SOCKET --name=$ARG_NAME --nb-vcpus=$TOTAL_VCPUS
 rm -f "$QMP_SOCKET"
 
 QEMU_CMD=(

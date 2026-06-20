@@ -10,7 +10,8 @@
 #include "linkedlist.h"
 #include "register_vm.h"
 
-#define QMP_BUFF_SIZE 65536
+#define QMP_VCPU_SIZE 4096
+
 #define QMP_CONNECT_RETRY_S 1
 
 /*
@@ -188,40 +189,50 @@ int main(int argc, char *argv[])
 {
 	const char *qmp_capabilities = "{ \"execute\": \"qmp_capabilities\" }";
 	const char *query_cpus = "{ \"execute\": \"query-cpus-fast\" }";
-	char buff[QMP_BUFF_SIZE];
+	char *buff = NULL;
 	const char *unix_socket;
 	const char *vm_name;
+	int nb_vcpus;
+	size_t bufsz;
 	Node *vcpus;
 	int sockfd;
 	int ret = 1;
 
-	if (argc < 3) {
-		fprintf(stderr, "Usage: %s <socket_path> <vm_name>\n", argv[0]);
+	if (argc < 4) {
+		fprintf(stderr, "Usage: %s <socket_path> <vm_name> <nb_vcpus>\n", argv[0]);
 		return 1;
 	}
 
 	unix_socket = argv[1];
 	vm_name = argv[2];
+	nb_vcpus = atoi(argv[3]);
+
+	bufsz = (size_t)nb_vcpus * QMP_VCPU_SIZE;
+	buff = malloc(bufsz);
+	if (buff == NULL) {
+		perror("Error allocating QMP Buffer");
+		return 1;
+	}
 
 	sockfd = qmp_connect(unix_socket);
 	if (sockfd < 0)
-		return 1;
+		goto cleanup_buff;
 
 	/* 1. Read QMP greeting */
-	memset(buff, 0, sizeof(buff));
-	if (qmp_read_line(sockfd, buff, sizeof(buff)) < 0) {
+	memset(buff, 0, bufsz);
+	if (qmp_read_line(sockfd, buff, bufsz) < 0) {
 		perror("read greeting");
 		goto cleanup_fd;
 	}
 	printf("QMP greeting: %s\n", buff);
 
 	/* 2. Capability negotiation */
-	if (qmp_send_recv(sockfd, qmp_capabilities, buff, sizeof(buff)) < 0)
+	if (qmp_send_recv(sockfd, qmp_capabilities, buff, bufsz) < 0)
 		goto cleanup_fd;
 	printf("Handshake response: %s\n", buff);
 
 	/* 3. Query vCPU info */
-	if (qmp_send_recv(sockfd, query_cpus, buff, sizeof(buff)) < 0)
+	if (qmp_send_recv(sockfd, query_cpus, buff, bufsz) < 0)
 		goto cleanup_fd;
 	printf("VM status: %s\n", buff);
 
@@ -245,5 +256,7 @@ int main(int argc, char *argv[])
 
 cleanup_fd:
 	close(sockfd);
+cleanup_buff:
+	free(buff);
 	return ret;
 }

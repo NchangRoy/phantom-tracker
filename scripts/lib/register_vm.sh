@@ -35,6 +35,16 @@ else
     echo "Expected: --name=<vm_name>"
     exit 1
 fi
+# Parse nb-vcpus argument
+# Expected format: --nb-vcpus=<nb_vcpus>
+if [[ "$3" == --nb-vcpus=* ]]; then
+    NB_VCPUS="${3#--nb-vcpus=}"
+    echo "nb_vcpus: $NB_VCPUS"
+else
+    echo "Invalid argument: $3"
+    echo "Expected: --nb-vcpus=<nb_vcpus>"
+    exit 1
+fi
 # ------------------------------------------------------------
 # Initialization phase
 # ------------------------------------------------------------
@@ -74,4 +84,4 @@ echo -e "\nRegistering VM $VM_NAME..."
 #   - registers vCPUs into eBPF maps
 #
 # NOTE: currently commented out (enable when ready)
- sudo ./../pvsched-host/bin/register_vm "$VM_SOCKET" "$VM_NAME" &
+ sudo ./../pvsched-host/bin/register_vm "$VM_SOCKET" "$VM_NAME" "$NB_VCPUS" &

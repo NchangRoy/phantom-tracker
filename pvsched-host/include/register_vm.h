@@ -93,14 +93,7 @@ static inline int register_vm(struct Node *vcpus, const char *vm_name,
 
 	strncpy(vm->qmp_socket, qmp_socket, sizeof(vm->qmp_socket) - 1);
 
-	/* Count the number of vCPUs to initialize phantom_count as initially stopped/waiting */
-	int vcpu_count = 0;
-	temp = vcpus->next;
-	while (temp) {
-		vcpu_count++;
-		temp = temp->next;
-	}
-	vm->phantom_count = vcpu_count;
+	vm->phantom_count = 0;
 
 	vm->collection_index = 0;
 	vm->processing_index = 0;
@@ -145,7 +138,7 @@ static inline int register_vm(struct Node *vcpus, const char *vm_name,
 
 		strncpy(vcpu->vm_name, vm_name, sizeof(vcpu->vm_name) - 1);
 		vcpu->vcpu_index = qmp_detail->cpuIndex;
-		vcpu->is_running = 0;
+		vcpu->is_phantom = 0;
 
 		key = (__u32)qmp_detail->threadId;
 
