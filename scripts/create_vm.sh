@@ -3,11 +3,12 @@
 #
 # Contributors:
 #   Human: Himadri Chhaya-Shailesh
-#   AI: Claude Sonet 4.6
+#   AI: Claude Sonet 4.6, ChatGPT-5.5
 #
-# Usage: create_vm.sh --name <vm-name>
+# Usage: create_vm.sh --name=<vm-name> --ssh-pubkey=<path-to-ssh-pubkey> [options]
+#
 
-set -euo pipefail
+set -euo pipefail # exit on error, unset variable, or failed pipeline
 
 arch="$(uname -m)"
 if [[ "$arch" != "x86_64" ]]; then
@@ -15,6 +16,7 @@ if [[ "$arch" != "x86_64" ]]; then
     exit 1
 fi
 
+# source helper scripts from lib/
 . "$(dirname "$0")/lib/args.sh"
 . "$(dirname "$0")/lib/numa.sh"
 . "$(dirname "$0")/lib/cloudinit.sh"
@@ -22,10 +24,12 @@ fi
 # --- Dependency check ---
 _DEPS_OK=1
 check_cmd qemu-system-x86_64 qemu-system-x86 fedora=qemu-kvm rhel=qemu-kvm centos=qemu-kvm almalinux=qemu-kvm rocky=qemu-kvm || _DEPS_OK=0
-check_cmd numactl             numactl                                                                                           || _DEPS_OK=0
+check_cmd numactl   numactl || _DEPS_OK=0
+
 [[ "$_DEPS_OK" -eq 1 ]] || exit 1
 
 declare_arg name           required "Name of the VM"
+declare_arg type           required "VM type (target or noise)"
 declare_arg ssh-pubkey     required "Path to SSH public key file to inject into the VM"
 declare_arg password       optional "Password for the debian user (for console login)" debian
 declare_arg sockets        optional "Number of CPU sockets" 1
@@ -41,23 +45,71 @@ declare_arg per-vm-cgroups    optional "Use cgroups for the VM" true
 declare_arg pin-to-socket     optional "Pin VM to a specific NUMA node" false
 declare_arg socket-nr         optional "NUMA node number (required when --pin-to-socket=true)"
 
-parse_args "$@"
+parse_args "$@" # parse all space-separated args
 
+if [[ "$ARG_TYPE" != "target" && "$ARG_TYPE" != "noise" ]]; then
+    echo "error: --type must be either 'target' or 'noise'" >&2
+    exit 1
+fi
+
+# We use the same name for pvsched-shmem backends and VM names, so validate the name here before we do any work.
 if [[ ! "$ARG_NAME" =~ ^[a-zA-Z0-9._-]+$ ]]; then
     echo "error: --name must contain only letters, digits, '.', '_', or '-'" >&2
     exit 1
 fi
 
+# We use vsocks for generating host-guest traces
 if [[ "$ARG_ADD_VSOCK" == "true" && -z "${ARG_VSOCK_CID:-}" ]]; then
     echo "error: --vsock-cid is required when --add-vsock is true" >&2
     exit 1
 fi
 
+# We use ivshmem for host-guest shared memory and pass host-guest messages using eBPF for target VMs
+if [[ "$ARG_TYPE" == "target" ]]; then
+    check_pkg_config libbpf libbpf-dev fedora=libbpf-devel rhel=libbpf-devel centos=libbpf-devel almalinux=libbpf-devel rocky=libbpf-devel opensuse=libbpf-devel sles=libbpf-devel arch=libbpf alpine=libbpf-dev gentoo=libbpf nixos=libbpf || exit 1
+    check_cmd bpftool   bpftool || exit 1
+    if ! command -v bpf-gcc &>/dev/null && ! command -v bpf-unknown-none-gcc &>/dev/null; then
+        echo "error: required BPF compiler not found: bpf-gcc (or bpf-unknown-none-gcc)" >&2
+        echo "  install it with:" >&2
+        distro_install_hint gcc-bpf fedora=gcc-bpf rhel=gcc centos=gcc almalinux=gcc rocky=gcc opensuse=gcc13 sles=gcc13 arch=gcc alpine=gcc gentoo=sys-devel/gcc nixos=gcc >&2
+        exit 1
+    fi
+
+    . "$(dirname "$0")/create_pvsched_shmem.sh"
+    create_pvsched_shmem_setup
+
+    cleanup_target_pvsched_shmem() {
+        if ! create_pvsched_shmem_cleanup; then
+            echo "warning: failed to fully clean up host_ivshmem resources" >&2
+        fi
+    }
+
+    trap cleanup_target_pvsched_shmem EXIT
+fi
+
+IVSHMEM_QEMU_ARGS=()
+HOSTBACKEND_DEVICE=""
+if [[ "$ARG_TYPE" == "target" ]]; then
+    HOSTBACKEND_DEVICE="/dev/host_ivshmem0"
+    if grep -qE '^host_ivshmem[[:space:]]' /proc/modules && [[ -e "$HOSTBACKEND_DEVICE" ]]; then
+        IVSHMEM_QEMU_ARGS=(
+            -object "memory-backend-file,id=hostmem0,size=8192,share=on,mem-path=$HOSTBACKEND_DEVICE"
+            -device "ivshmem-plain,memdev=hostmem0"
+        )
+        echo "ivshmem: enabled host-backed shared memory via $HOSTBACKEND_DEVICE"
+    else
+        HOSTBACKEND_DEVICE=""
+        echo "warning: host_ivshmem is not ready (host backend device missing or module not loaded), skipping ivshmem device" >&2
+    fi
+fi
+
+# On multi-numa hosts, pinning a VM to a single numa-node is the standard practice, and we support this
 if [[ "$ARG_PIN_TO_SOCKET" == "true" && -z "${ARG_SOCKET_NR:-}" ]]; then
     echo "error: --socket-nr is required when --pin-to-socket is true" >&2
     exit 1
 fi
 
+# We don't use one-to-one vCPU to pCPU mapping, but rather allow the host scheduler to distribute vCPUs across the host pCPUs of the specified numa node.
 PCPU_LIST=""
 if [[ "$ARG_PIN_TO_SOCKET" == "true" ]]; then
     numa_check
@@ -70,9 +122,14 @@ if [[ "$ARG_PIN_TO_SOCKET" == "true" ]]; then
     echo "socket $ARG_SOCKET_NR pCPUs: $PCPU_LIST"
 fi
 
+# Print the effective configuration before launching the VM.
 echo "name: $ARG_NAME"
+echo "type: $ARG_TYPE"
 echo "pin-to-socket: $ARG_PIN_TO_SOCKET"
 echo "socket-nr: ${ARG_SOCKET_NR:-}"
+if [[ "$ARG_TYPE" == "target" ]]; then
+    echo "hostbackend-device: ${HOSTBACKEND_DEVICE:-unavailable}"
+fi
 
 # --- Disk image ---
 DISK_IMG="${ARG_NAME}.qcow2"
@@ -116,6 +173,7 @@ QEMU_CMD=(
     -m "$ARG_MEM"
     -smp "$CPU_TOPOLOGY"
     -drive "file=$DISK_IMG,format=qcow2,if=virtio"
+    "${IVSHMEM_QEMU_ARGS[@]}"
     "${SEED_ISO_ARG[@]}"
     -net nic,model=virtio
     -net "user,hostfwd=tcp::${ARG_SSH_PORT}-:22"
@@ -151,12 +209,16 @@ if [[ "$ARG_PER_VM_CGROUPS" == "true" ]]; then
 fi
 
 echo "launching VM:"
-printf '  %q' "${QEMU_CMD[@]}"
+printf '  %q' "${QEMU_CMD[@]}" # Print the full qemu command
 printf '\n'
 echo "once booted, SSH in with: ssh -p $ARG_SSH_PORT debian@localhost"
 if [[ -n "${SEED_ISO_ARG[*]}" ]]; then
     echo "note: first boot runs cloud-init, SSH may take 1-2 minutes to become available"
 fi
-echo "starting in 10 seconds..."
+echo "starting in 10 seconds..." # Sleep before starting to give the user a chance to read the output and cancel if something looks wrong
 sleep 10
-exec "${QEMU_CMD[@]}"
+set +e
+"${QEMU_CMD[@]}"
+qemu_rc=$?
+set -e
+exit "$qemu_rc"

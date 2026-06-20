@@ -52,3 +52,9 @@ pvsched-host/**/*.skel.h
 # =========================
 *.qcow2
 scripts/*.qcow2
+# VM image artifacts
+*.qcow2
+*.iso
+
+# Generated BPF headers
+vmlinux.h

@@ -3,7 +3,7 @@
 #
 # Contributors:
 #   Human: Himadri Chhaya-Shailesh
-#   AI: Claude Sonet 4.6
+#   AI: Claude Sonet 4.6, ChatGPT-5.5
 #
 # Reusable named-argument parsing library.
 #
@@ -24,6 +24,7 @@
 # Optional arguments with a default are pre-set before parsing; the user
 # can override them on the command line.
 
+# Initialize empty arrays to hold argument metadata
 _ARG_NAMES=()
 _ARG_REQUIRED=()
 _ARG_DESCS=()
@@ -43,7 +44,7 @@ declare_arg() {
 }
 
 print_usage() {
-    local script="${BASH_SOURCE[-1]:-$0}"
+    local script="${BASH_SOURCE[-1]:-$0}" # Get the original script name for usage
     echo "usage: $(basename "$script") [options]" >&2
     echo >&2
     echo "options:" >&2
@@ -63,9 +64,9 @@ parse_args() {
     for i in "${!_ARG_NAMES[@]}" ; do
         local default="${_ARG_DEFAULTS[$i]:-}"
         if [[ -n "$default" ]]; then
-            local var="ARG_${_ARG_NAMES[$i]//-/_}"
-            var="${var^^}"
-            printf -v "$var" '%s' "$default"
+            local var="ARG_${_ARG_NAMES[$i]//-/_}" # replace - with _ for variable naming
+            var="${var^^}" # use uppercase for variable naming
+            printf -v "$var" '%s' "$default" # set default value
         fi
     done
 
@@ -81,13 +82,13 @@ parse_args() {
                     print_usage
                     exit 1
                 fi
-                local key="${1#--}"
-                local value="${key#*=}"
-                key="${key%%=*}"
+                local key="${1#--}" # Remove leading --
+                local value="${key#*=}" # Remove chars before =
+                key="${key%%=*}" # Remove chars after =
                 local var="ARG_${key//-/_}"
                 var="${var^^}"
                 printf -v "$var" '%s' "$value"
-                shift
+                shift # Remove the current argument and continue parsing
                 ;;
             *)
                 echo "error: unknown argument: $1" >&2
