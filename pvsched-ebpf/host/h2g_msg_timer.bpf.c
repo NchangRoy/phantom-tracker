@@ -40,7 +40,14 @@ static int h2g_msg_timer_callback(void *map, __u32 *key,
   if (!hg_timer)
     return 0;
 
-  hg_timer->index = (hg_timer->index + 1) % NR_HOST_IVSHMEM_MSGS;
+  hg_timer->index++;
+
+  if (hg_timer->index >= NR_HOST_IVSHMEM_MSGS)
+	  hg_timer->index = H2G_FIRST_HISTORY_SLOT;
+
+  if (hg_timer->index < H2G_FIRST_HISTORY_SLOT)
+	  hg_timer->index = H2G_FIRST_HISTORY_SLOT;
+
   hg_timer->hg_msg.msg = bpf_ktime_get_ns() / 1000;
 
   bpf_host_ivshmem_h2g_write(hg_timer->index, &hg_timer->hg_msg);

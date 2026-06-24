@@ -49,5 +49,7 @@ struct hg_message {
 
 #define NR_HOST_IVSHMEM_MSGS \
 		(PVSCHED_IVSHMEM_PAGE_SIZE / HOST_IVSHMEM_MSG_SIZE)
+#define H2G_LATEST_SLOT	0
+#define H2G_FIRST_HISTORY_SLOT	1
 
 #endif /* _PVSCHED_H */

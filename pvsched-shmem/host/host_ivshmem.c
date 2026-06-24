@@ -33,6 +33,9 @@
 /*
  * For now, each backend owns exactly two pages:
  *   page 0: host-to-guest communication
+ *		slot-0 is reserved for the latest msg
+ *		slot-1 to NR_HOST_IVSHMEM_MSGS-1 are used for the history of msgs
+ *		see pvsched.h for the definitions of these slots
  *   page 1: guest-to-host communication
  */
 #define HOST_IVSHMEM_SIZE (2 * PVSCHED_IVSHMEM_PAGE_SIZE)
@@ -102,20 +105,11 @@ static struct host_ivshmem_backend backend = {
 	.minor = 0,
 };
 
-static int host_ivshmem_validate_h2g_msg_index(u32 index)
-{
-	if (index >= NR_HOST_IVSHMEM_MSGS)
-		return -EINVAL;
-
-	return 0;
-}
-
 static int host_ivshmem_h2g_write_msg(struct host_ivshmem_backend *backend,
 				 u32 index, const struct hg_message *hg_msg)
 {
-	struct hg_message *dst;
+	struct hg_message *history, *latest;
 	char *h2g_page;
-	int ret;
 
 	if (!backend || !backend->mem)
 		return -ENODEV;
@@ -123,14 +117,15 @@ static int host_ivshmem_h2g_write_msg(struct host_ivshmem_backend *backend,
 	if (!hg_msg)
 		return -EINVAL;
 
-	ret = host_ivshmem_validate_h2g_msg_index(index);
-
-	if (ret)
-		return ret;
+	if (index == H2G_LATEST_SLOT || index >= NR_HOST_IVSHMEM_MSGS)
+		return -EINVAL;
 
 	h2g_page = (char *) backend->mem + HOST_IVSHMEM_H2G_OFFSET;
-	dst = (struct hg_message *)(h2g_page + index * HOST_IVSHMEM_MSG_SIZE);
-	WRITE_ONCE(dst->msg, hg_msg->msg);
+	history = (struct hg_message *)(h2g_page + index * HOST_IVSHMEM_MSG_SIZE);
+	latest = (struct hg_message *)(h2g_page + H2G_LATEST_SLOT * HOST_IVSHMEM_MSG_SIZE);
+
+	WRITE_ONCE(history->msg, hg_msg->msg);
+	smp_store_release(&latest->msg, hg_msg->msg);
 
 	return 0;
 }
