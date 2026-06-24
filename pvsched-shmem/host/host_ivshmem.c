@@ -113,7 +113,7 @@ static int host_ivshmem_validate_h2g_msg_index(u32 index)
 static int host_ivshmem_h2g_write_msg(struct host_ivshmem_backend *backend,
 				 u32 index, const struct hg_message *hg_msg)
 {
-	size_t offset;
+	struct hg_message *dst;
 	char *h2g_page;
 	int ret;
 
@@ -129,8 +129,8 @@ static int host_ivshmem_h2g_write_msg(struct host_ivshmem_backend *backend,
 		return ret;
 
 	h2g_page = (char *) backend->mem + HOST_IVSHMEM_H2G_OFFSET;
-	offset = (size_t) index * HOST_IVSHMEM_MSG_SIZE;
-	memcpy(h2g_page + offset, hg_msg, HOST_IVSHMEM_MSG_SIZE);
+	dst = (struct hg_message *)(h2g_page + index * HOST_IVSHMEM_MSG_SIZE);
+	WRITE_ONCE(dst->msg, hg_msg->msg);
 
 	return 0;
 }
