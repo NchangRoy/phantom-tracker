@@ -171,9 +171,6 @@ CPU_TOPOLOGY="$TOTAL_VCPUS,sockets=$ARG_SOCKETS,cores=$ARG_CORES,threads=$ARG_TH
 
 #--vm qmp socket definition ----
 QMP_SOCKET="/tmp/${ARG_NAME}-qmp.sock"
-#--start and pass qmp socket to  register_vm.sh 
-
-bash lib/register_vm.sh --socket=$QMP_SOCKET --name=$ARG_NAME --nb-vcpus=$TOTAL_VCPUS
 rm -f "$QMP_SOCKET"
 
 QEMU_CMD=(
@@ -229,7 +226,27 @@ fi
 echo "starting in 10 seconds..." # Sleep before starting to give the user a chance to read the output and cancel if something looks wrong
 sleep 10
 set +e
-"${QEMU_CMD[@]}"
+"${QEMU_CMD[@]}" &
+qemu_pid=$!
+
+# Wait for QEMU to create the QMP socket before registering the VM
+echo "waiting for QMP socket at $QMP_SOCKET..."
+for i in $(seq 1 30); do
+    if [[ -S "$QMP_SOCKET" ]]; then
+        echo "QMP socket ready"
+        break
+    fi
+    sleep 1
+done
+
+if [[ -S "$QMP_SOCKET" ]]; then
+    bash "$(dirname "$0")/lib/register_vm.sh" --socket="$QMP_SOCKET" --name="$ARG_NAME" --nb-vcpus="$TOTAL_VCPUS"
+else
+    echo "warning: QMP socket never appeared, skipping VM registration" >&2
+fi
+
+wait "$qemu_pid"
 qemu_rc=$?
+rm -f "$QMP_SOCKET"
 set -e
 exit "$qemu_rc"
