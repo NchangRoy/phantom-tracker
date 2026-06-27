@@ -26,18 +26,7 @@ _DEPS_OK=1
 check_cmd qemu-system-x86_64 qemu-system-x86 fedora=qemu-kvm rhel=qemu-kvm centos=qemu-kvm almalinux=qemu-kvm rocky=qemu-kvm || _DEPS_OK=0
 check_cmd numactl   numactl || _DEPS_OK=0
 
-[[ "$_DEPS_OK" -eq 1 ]] ||look at this whehter there are some merge errors 
-undo
-￼
-Worked for 59s
-Error
-Unknown: There was a network issue connecting to the server, please try again.
-chevron_right
-4:55 PM
-content_copy
-thumb_up
-thumb_down
- exit 1
+[[ "$_DEPS_OK" -eq 1 ]] || exit 1
 
 declare_arg name           required "Name of the VM"
 declare_arg type           required "VM type (target or noise)"
