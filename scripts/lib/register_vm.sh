@@ -15,6 +15,12 @@
 #
 # Expected usage:
 #   ./script.sh --socket=<vm_socket> --name=<vm_name>
+
+# Anchor all paths to the repo root (this script lives at scripts/lib/)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PVSCHED_HOST="$REPO_DIR/pvsched-host"
+
 # Parse VM socket argument
 # Expected format: --socket=<vm_socket>
 if [[ "$1" == --socket=* ]]; then
@@ -49,7 +55,7 @@ fi
 # Build phase
 # ------------------------------------------------------------
 echo "Building pvsched-host binaries..."
-make -C ./../pvsched-host
+make -C "$PVSCHED_HOST"
 # ------------------------------------------------------------
 # Initialization phase
 # ------------------------------------------------------------
@@ -60,7 +66,7 @@ echo "Connecting to vm socket $VM_SOCKET"
 #   - load BPF program into kernel
 #   - create/register required maps
 #   - initialize tracking structures
- sudo ./../pvsched-host/bin/create_maps.loader 
+sudo "$PVSCHED_HOST/bin/create_maps.loader"
 # Optional: give loader time to initialize maps and attach probes
 sleep 1
 # Start the ebpf timer in the background
@@ -69,7 +75,7 @@ sleep 1
 # Kill any previously running timer to avoid two timers racing on the same maps
 sudo pkill -f timer.loader || true
 sleep 0.5
-TIMER_BIN="./../pvsched-host/bin/timer.loader"
+TIMER_BIN="$PVSCHED_HOST/bin/timer.loader"
 sudo "$TIMER_BIN" &
 timer_pid=$!
 sleep 1
@@ -87,6 +93,4 @@ echo -e "\nRegistering VM $VM_NAME..."
 #   - communicates with QEMU via QMP socket
 #   - queries VM configuration
 #   - registers vCPUs into eBPF maps
-#
-# NOTE: currently commented out (enable when ready)
- sudo ./../pvsched-host/bin/register_vm "$VM_SOCKET" "$VM_NAME" "$NB_VCPUS" &
+sudo "$PVSCHED_HOST/bin/register_vm" "$VM_SOCKET" "$VM_NAME" "$NB_VCPUS" &
