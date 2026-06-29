@@ -20,6 +20,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PVSCHED_HOST="$REPO_DIR/pvsched-host"
+PVSCHED_EBPF_HOST="$REPO_DIR/pvsched-ebpf/host"
 
 # Parse VM socket argument
 # Expected format: --socket=<vm_socket>
@@ -56,6 +57,8 @@ fi
 # ------------------------------------------------------------
 echo "Building pvsched-host binaries..."
 make -C "$PVSCHED_HOST"
+echo "Building pvsched-ebpf/host binaries..."
+make -C "$PVSCHED_EBPF_HOST"
 # ------------------------------------------------------------
 # Initialization phase
 # ------------------------------------------------------------
@@ -94,3 +97,10 @@ echo -e "\nRegistering VM $VM_NAME..."
 #   - queries VM configuration
 #   - registers vCPUs into eBPF maps
 sudo "$PVSCHED_HOST/bin/register_vm" "$VM_SOCKET" "$VM_NAME" "$NB_VCPUS" &
+
+# Start the h2g_msg_timer: writes host timestamps into ivshmem every 4ms
+# This is what the guest reads to detect phantom vCPU stalls
+echo "Starting h2g_msg_timer (writes to ivshmem)..."
+sudo pkill -f h2g_msg_timer_loader || true
+sudo "$PVSCHED_EBPF_HOST/h2g_msg_timer_loader" &
+echo "h2g_msg_timer_loader started (pid $!)"
