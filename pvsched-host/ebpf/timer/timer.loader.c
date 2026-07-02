@@ -7,18 +7,16 @@
 #include "phantom_tracker.h"
 
 static struct timer_bpf *skel;
-static struct bpf_tc_hook hook;
-static struct bpf_tc_opts opts;
+static struct bpf_link *prog_link;
 
 /*
  * Inputs: sig - the signal number received
  * Outputs: None
- * Description: Signal handler that detaches the TC hook and cleans up the BPF skeleton before exiting
+ * Description: Signal handler that detaches the program and cleans up the BPF skeleton before exiting
  */
 static void cleanup(int sig)
 {
-	bpf_tc_detach(&hook, &opts);
-	bpf_tc_hook_destroy(&hook);
+	bpf_link__destroy(prog_link);
 	timer_bpf__destroy(skel);
 	printf("cleaned up\n");
 	_exit(0);
@@ -27,7 +25,7 @@ static void cleanup(int sig)
 /*
  * Inputs: None
  * Outputs: Returns 0 on success, 1 on failure
- * Description: Main function that opens the BPF skeleton, reuses pinned maps, loads the BPF program, and attaches it to the TC ingress hook
+ * Description: Main function that opens the BPF skeleton, reuses pinned maps, loads the BPF program, and attaches it to sched_switch
  */
 int main()
 {
@@ -76,20 +74,14 @@ int main()
 	signal(SIGINT, cleanup);
 	signal(SIGTERM, cleanup);
 
-	LIBBPF_OPTS(bpf_tc_hook, h, .ifindex = 1,
-		    .attach_point = BPF_TC_INGRESS);
-	LIBBPF_OPTS(bpf_tc_opts, o,
-		    .prog_fd = bpf_program__fd(skel->progs.tc_prog));
-	hook = h;
-	opts = o;
-
-	bpf_tc_hook_create(&hook);
-	if (bpf_tc_attach(&hook, &opts)) {
-		fprintf(stderr, "tc attach failed\n");
+	prog_link = bpf_program__attach(skel->progs.timer_init);
+	if (libbpf_get_error(prog_link)) {
+		fprintf(stderr, "attach failed\n");
+		prog_link = NULL;
 		goto cleanup_inner;
 	}
 
-	printf("attached — send any packet to lo to start timer\n");
+	printf("attached — timer starts on the next sched_switch event\n");
 
 	printf("watch: cat /sys/kernel/debug/tracing/trace_pipe\n");
 	pause();

@@ -247,12 +247,13 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 }
 
 /*
- * Inputs: skb - socket buffer containing network packet data
+ * Inputs: ctx - raw tracepoint context (unused)
  * Outputs: Returns 0
- * Description: TC ingress program that initializes and starts the phantom average processing timer on the first packet
+ * Description: Initializes and starts the phantom average processing timer
+ *              on the first sched_switch event after loading.
  */
-SEC("tc/ingress")
-int tc_prog(struct __sk_buff *skb)
+SEC("tp_btf/sched_switch")
+int timer_init(__u64 *ctx)
 {
 	__u32 key = 0;
 	struct elem *e = bpf_map_lookup_elem(&timer_map, &key);
