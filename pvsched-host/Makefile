@@ -1,11 +1,13 @@
 # ============================================================
 # Compiler configuration
 # ============================================================
-CC = gcc
-BPF_CC = bpf-gcc
+CC ?= gcc
+BPF_CC ?= bpf-gcc
 CLANG = clang
-CFLAGS = -Wall -Wextra -O2 -g
+CFLAGS ?= -Wall -Wextra -O2 -g
 INCLUDES = -Iuser -Iinclude
+
+BPF_PROG_CFLAGS ?= -O2 -g -gbtf -Wall -Wextra -Wno-unused-parameter
 
 # Final userspace target (VM registration binary)
 TARGET = bin/register_vm
@@ -49,7 +51,7 @@ include:
 
 
 bin/create_maps.bpf.o: ebpf/create_maps/create_maps.bpf.c | bin include/vmlinux.h
-	$(BPF_CC) -g -O2 -gbtf -c $< -o $@ $(BPF_INCLUDE)
+	$(BPF_CC) $(BPF_PROG_CFLAGS) $(BPF_INCLUDE) -c $< -o $@
 
 # Generate skeleton header from BPF object
 include/create_maps.skel.h: bin/create_maps.bpf.o
@@ -60,7 +62,7 @@ bin/create_maps.loader: include/create_maps.skel.h ebpf/create_maps/create_maps.
 	gcc ebpf/create_maps/create_maps.loader.c -o $@ $(BPF_CFLAGS) $(BPF_LDLIBS) $(BPF_INCLUDE)
 
 bin/timer.bpf.o: ebpf/timer/timer.bpf.c | bin include/vmlinux.h
-	$(BPF_CC) -g -O2 -gbtf -c $< -o $@ $(BPF_INCLUDE)
+	$(BPF_CC) $(BPF_PROG_CFLAGS) $(BPF_INCLUDE) -c $< -o $@
 
 include/timer.skel.h: bin/timer.bpf.o
 	bpftool gen skeleton $< > $@
