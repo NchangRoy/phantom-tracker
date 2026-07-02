@@ -211,7 +211,7 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 		vm->processing_index = 1; // start next samples at 1
 
 		// Swap is_collecting to 0 atomically so switch handlers start writing to processing map
-		__sync_val_compare_and_swap(&vm->is_collecting, 1, 0);
+		__sync_bool_compare_and_swap(&vm->is_collecting, 1, 0);
 
 		// Reserve index for count_end atomically in the old collection map
 		__u32 end_idx = __sync_fetch_and_add(&vm->collection_index, 1);
@@ -230,7 +230,7 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 		vm->collection_index = 1; // start next samples at 1
 
 		// Swap is_collecting to 1 atomically so switch handlers start writing to collection map
-		__sync_val_compare_and_swap(&vm->is_collecting, 0, 1);
+		__sync_bool_compare_and_swap(&vm->is_collecting, 0, 1);
 
 		// Reserve index for count_end atomically in the old processing map
 		__u32 end_idx = __sync_fetch_and_add(&vm->processing_index, 1);
@@ -260,13 +260,13 @@ int tc_prog(struct __sk_buff *skb)
 		return 0;
 
 	// First packet starts the timer, all subsequent packets are ignored
-	if (__sync_val_compare_and_swap(&e->started, 0, 1) != 0)
+	if (!__sync_bool_compare_and_swap(&e->started, 0, 1))
 		return 0;
 
 	int ret = bpf_timer_init(&e->timer, &timer_map, CLOCK_BOOTTIME);
 	if (ret) {
 		bpf_printk("timer_init failed: %d\n", ret);
-		__sync_val_compare_and_swap(&e->started, 1, 0);
+		__sync_bool_compare_and_swap(&e->started, 1, 0);
 		return 0;
 	}
 	bpf_timer_set_callback(&e->timer, timer_cb);
