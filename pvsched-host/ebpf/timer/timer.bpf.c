@@ -10,7 +10,7 @@ char LICENSE[] SEC("license") = "GPL";
 struct elem {
 	struct bpf_timer timer;
 	__u64 counter;
-	__u64 started;
+	__u32 started;
 };
 
 struct {
@@ -260,11 +260,11 @@ int tc_prog(struct __sk_buff *skb)
 		return 0;
 
 	// First packet starts the timer, all subsequent packets are ignored
-	if (__sync_val_compare_and_swap(&e->started, 0ULL, 1ULL) == 0) {
+	if (__sync_val_compare_and_swap(&e->started, 0U, 1U) == 0) {
 		int ret = bpf_timer_init(&e->timer, &timer_map, CLOCK_BOOTTIME);
 		if (ret) {
 			bpf_printk("timer_init failed: %d\n", ret);
-			__sync_val_compare_and_swap(&e->started, 1ULL, 0ULL);
+			__sync_val_compare_and_swap(&e->started, 1U, 0U);
 			return 0;
 		}
 		bpf_timer_set_callback(&e->timer, timer_cb);
