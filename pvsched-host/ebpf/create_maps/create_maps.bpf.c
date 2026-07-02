@@ -68,11 +68,8 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 	__u64 ts;
 	struct vcpu_t *vcpu;
 	struct vm_t *vm;
-	char collection_buff[VM_NAME_LEN] = {};
-	char processing_buff[VM_NAME_LEN] = {};
-	int i = 0;
+	int i;
 	__u32 idx;
-	struct phantom_count count = {};
 	void *collection_map_ptr, *processing_map_ptr;
 	s64 new_count;
 
@@ -91,6 +88,10 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 			vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
 
 			if (vm != NULL) {
+				char collection_buff[VM_NAME_LEN] = {};
+				char processing_buff[VM_NAME_LEN] = {};
+				struct phantom_count count = {};
+
 				/* Decrement, but clamp at 0.
 				 * If phantom_count is 0 the vCPU was already running when
 				 * register_vm populated the map, so we missed the initial
@@ -193,6 +194,10 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 			vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
 
 			if (vm != NULL) {
+				char collection_buff[VM_NAME_LEN] = {};
+				char processing_buff[VM_NAME_LEN] = {};
+				struct phantom_count count = {};
+
 				new_count =
 					__sync_fetch_and_add(&vm->phantom_count, 1) + 1;
 
