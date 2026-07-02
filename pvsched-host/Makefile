@@ -2,6 +2,8 @@
 # Compiler configuration
 # ============================================================
 CC = gcc
+BPF_CC = bpf-gcc
+CLANG = clang
 CFLAGS = -Wall -Wextra -O2 -g
 INCLUDES = -Iuser -Iinclude
 
@@ -32,7 +34,7 @@ bin:
 #   3. build loader (userspace program that loads BPF)
 # ============================================================
 
-BPF_INCLUDE = -Iinclude
+BPF_INCLUDE = -Iinclude -I/usr/include
 # Build eBPF loader (userspace program that loads BPF into kernel)
 BPF_CFLAGS := $(shell pkg-config --cflags libbpf)
 BPF_LDLIBS := $(shell pkg-config --libs libbpf)
@@ -47,7 +49,7 @@ include:
 
 
 bin/create_maps.bpf.o: ebpf/create_maps/create_maps.bpf.c | bin include/vmlinux.h
-	clang -g -O2 -target bpf -mcpu=v3 -c $< -o $@ $(BPF_INCLUDE)
+	$(BPF_CC) -g -O2 -gbtf -c $< -o $@ $(BPF_INCLUDE)
 
 # Generate skeleton header from BPF object
 include/create_maps.skel.h: bin/create_maps.bpf.o
@@ -58,7 +60,7 @@ bin/create_maps.loader: include/create_maps.skel.h ebpf/create_maps/create_maps.
 	gcc ebpf/create_maps/create_maps.loader.c -o $@ $(BPF_CFLAGS) $(BPF_LDLIBS) $(BPF_INCLUDE)
 
 bin/timer.bpf.o: ebpf/timer/timer.bpf.c | bin include/vmlinux.h
-	clang -g -O2 -target bpf -mcpu=v3 -c $< -o $@ $(BPF_INCLUDE)
+	$(BPF_CC) -g -O2 -gbtf -c $< -o $@ $(BPF_INCLUDE)
 
 include/timer.skel.h: bin/timer.bpf.o
 	bpftool gen skeleton $< > $@

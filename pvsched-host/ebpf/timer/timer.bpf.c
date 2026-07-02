@@ -139,9 +139,7 @@ static int timer_cb(void *map, __u32 *key, struct elem *val)
 
 	// swap collection and processing maps for each vm
 	// iterate through each vm
-	long (*cb_p)(struct bpf_map *, const void *, void *, void *) =
-		&callback_fn;
-	bpf_for_each_map_elem(&vms, cb_p, NULL, 0);
+	bpf_for_each_map_elem(&vms, callback_fn, NULL, 0);
 
 	bpf_timer_start(&val->timer, 4000000ULL, 0);
 	return 0;
