@@ -260,16 +260,17 @@ int tc_prog(struct __sk_buff *skb)
 		return 0;
 
 	// First packet starts the timer, all subsequent packets are ignored
-	if (__sync_val_compare_and_swap(&e->started, 0, 1) == 0) {
-		int ret = bpf_timer_init(&e->timer, &timer_map, CLOCK_BOOTTIME);
-		if (ret) {
-			bpf_printk("timer_init failed: %d\n", ret);
-			__sync_val_compare_and_swap(&e->started, 1, 0);
-			return 0;
-		}
-		bpf_timer_set_callback(&e->timer, timer_cb);
-		bpf_timer_start(&e->timer, 1000000000ULL, 0);
-		bpf_printk("timer started on first packet\n");
+	if (__sync_val_compare_and_swap(&e->started, 0, 1) != 0)
+		return 0;
+
+	int ret = bpf_timer_init(&e->timer, &timer_map, CLOCK_BOOTTIME);
+	if (ret) {
+		bpf_printk("timer_init failed: %d\n", ret);
+		__sync_val_compare_and_swap(&e->started, 1, 0);
+		return 0;
 	}
+	bpf_timer_set_callback(&e->timer, timer_cb);
+	bpf_timer_start(&e->timer, 1000000000ULL, 0);
+	bpf_printk("timer started on first packet\n");
 	return 0;
 }
