@@ -22,8 +22,8 @@
 #define PIN_REGISTRY PIN_BASE "/map_registry"
 
 #define VM_MAP_MAX_ENTRIES 1000000
-#define VM_KEY_SUFFIX_C "_c"
-#define VM_KEY_SUFFIX_P "_p"
+#define VM_KEY_SUFFIX_1 "_1"
+#define VM_KEY_SUFFIX_2 "_2"
 
 static inline void cleanup_stale_vcpus(int vcpus_fd, const char *vm_name)
 {
@@ -75,7 +75,7 @@ static inline void cleanup_stale_vcpus(int vcpus_fd, const char *vm_name)
  * Returns 0 on success, -1 on error.
  */
 static inline int register_vm(struct Node *vcpus, const char *vm_name,
-			      const char *qmp_socket)
+			      const char *qmp_socket, int nb_vcpus)
 {
 	struct vm_t *vm;
 	char vm_key[64];
@@ -95,9 +95,10 @@ static inline int register_vm(struct Node *vcpus, const char *vm_name,
 
 	vm->phantom_count = 0;
 
-	vm->collection_index = 0;
-	vm->processing_index = 0;
-	vm->is_collecting = 0;
+	vm->collection_buff_1_index = 0;
+	vm->collection_buff_2_index = 0;
+	vm->is_collectx_in_buff_1 = 0;
+	vm->nb_vcpus = (__u32)nb_vcpus;
 
 	vm_fd = bpf_obj_get(PIN_VMS);
 	if (vm_fd < 0) {
@@ -197,58 +198,58 @@ static inline int setup_vm_maps(const char *vm_name)
 		goto cleanup_registry;
 	}
 
-	/* collection map */
-	collection = bpf_map_create(BPF_MAP_TYPE_ARRAY, "collection",
+	/* collection_buff_1 map */
+	collection = bpf_map_create(BPF_MAP_TYPE_ARRAY, "collection_buff_1",
 				    sizeof(__u32), sizeof(struct phantom_count),
 				    VM_MAP_MAX_ENTRIES, NULL);
 	if (collection < 0) {
-		perror("bpf_map_create collection");
+		perror("bpf_map_create collection_buff_1");
 		goto cleanup_registry;
 	}
 
-	snprintf(pin_path, sizeof(pin_path), PIN_BASE "/%s/collection",
+	snprintf(pin_path, sizeof(pin_path), PIN_BASE "/%s/collection_buff_1",
 		 vm_name);
 	unlink(pin_path);
 	if (bpf_obj_pin(collection, pin_path) < 0) {
-		perror("bpf_obj_pin collection");
+		perror("bpf_obj_pin collection_buff_1");
 		goto cleanup_collection;
 	}
 
-	/* processing map */
-	processing = bpf_map_create(BPF_MAP_TYPE_ARRAY, "processing",
+	/* collection_buff_2 map */
+	processing = bpf_map_create(BPF_MAP_TYPE_ARRAY, "collection_buff_2",
 				    sizeof(__u32), sizeof(struct phantom_count),
 				    VM_MAP_MAX_ENTRIES, NULL);
 	if (processing < 0) {
-		perror("bpf_map_create processing");
+		perror("bpf_map_create collection_buff_2");
 		goto cleanup_collection;
 	}
 
-	snprintf(pin_path, sizeof(pin_path), PIN_BASE "/%s/processing",
+	snprintf(pin_path, sizeof(pin_path), PIN_BASE "/%s/collection_buff_2",
 		 vm_name);
 	unlink(pin_path);
 	if (bpf_obj_pin(processing, pin_path) < 0) {
-		perror("bpf_obj_pin processing");
+		perror("bpf_obj_pin collection_buff_2");
 		goto cleanup_processing;
 	}
 
-	/* register collection map in registry */
+	/* register collection_buff_1 map in registry */
 	memset(key, 0, sizeof(key));
-	snprintf(key, sizeof(key), "%s" VM_KEY_SUFFIX_C, vm_name);
+	snprintf(key, sizeof(key), "%s" VM_KEY_SUFFIX_1, vm_name);
 	col_fd = (__u32)collection;
 
 	if (bpf_map_update_elem(registry_fd, key, &col_fd, BPF_ANY) < 0) {
-		fprintf(stderr, "bpf_map_update_elem collection registry: %s\n",
+		fprintf(stderr, "bpf_map_update_elem collection_buff_1 registry: %s\n",
 			strerror(errno));
 		goto cleanup_processing;
 	}
 
-	/* register processing map in registry */
+	/* register collection_buff_2 map in registry */
 	memset(key, 0, sizeof(key));
-	snprintf(key, sizeof(key), "%s" VM_KEY_SUFFIX_P, vm_name);
+	snprintf(key, sizeof(key), "%s" VM_KEY_SUFFIX_2, vm_name);
 	proc_fd = (__u32)processing;
 
 	if (bpf_map_update_elem(registry_fd, key, &proc_fd, BPF_ANY) < 0) {
-		fprintf(stderr, "bpf_map_update_elem processing registry: %s\n",
+		fprintf(stderr, "bpf_map_update_elem collection_buff_2 registry: %s\n",
 			strerror(errno));
 		goto cleanup_processing;
 	}

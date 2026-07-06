@@ -84,7 +84,25 @@ if [[ "$ARG_TYPE" == "target" ]]; then
         fi
     }
 
-    trap cleanup_target_pvsched_shmem EXIT
+    cleanup_target_pvsched_ebpf() {
+        echo "Cleaning up BPF maps and registry for VM: $ARG_NAME"
+        local pvsched_host
+        pvsched_host="$(cd "$(dirname "${BASH_SOURCE[0]}")/../pvsched-host" && pwd)"
+        if [[ -x "$pvsched_host/bin/cleanup" ]]; then
+            sudo "$pvsched_host/bin/cleanup" "$ARG_NAME" || true
+        fi
+
+        echo "Stopping background VM monitoring loaders..."
+        sudo pkill -f timer.loader || true
+        sudo pkill -f h2g_msg_timer_loader || true
+    }
+
+    cleanup_all() {
+        cleanup_target_pvsched_shmem
+        cleanup_target_pvsched_ebpf
+    }
+
+    trap cleanup_all EXIT
 fi
 
 IVSHMEM_QEMU_ARGS=()
@@ -228,7 +246,7 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
-if [[ -S "$QMP_SOCKET" ]]; then
+if [[ -S "$QMP_SOCKET" && "$ARG_TYPE" == "target" ]]; then
     bash "$(dirname "$0")/lib/register_vm.sh" --socket="$QMP_SOCKET" --name="$ARG_NAME" --nb-vcpus="$TOTAL_VCPUS"
 else
     echo "warning: QMP socket never appeared, skipping VM registration" >&2

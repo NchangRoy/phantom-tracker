@@ -7,8 +7,8 @@
 char LICENSE[] SEC("license") = "GPL";
 
 #define TASK_RUNNING            0x00000000
-#define TASK_INTERRUPTIBLE      0x00000001
-#define TASK_UNINTERRUPTIBLE    0x00000002
+#define TASK_WAKING			0x00000200
+
 
 // map containing all vms
 struct {
@@ -55,6 +55,33 @@ static inline s64 atomic_dec_if_pos(s64 *p)
 	return *(volatile s64 *)p;
 }
 
+
+
+
+
+/*
+ * Inputs: p - pointer to s64 value (vm->phantom_count)
+		   vCPUs - pointer to u32 value (vm->vcpu_count)
+ * Outputs: Returns the decremented value on success, or the value at p if <= 0 or if all retries failed
+ * Description: Atomically decrements the value pointed to by p if it is positive.
+ *              Uses BPF 64-bit atomic compare-and-swap to ensure correct field-level atomicity.
+ */
+ static inline s64 atomic_inc_if_lt_ceil(s64 *p, u32 *ceil_val)
+{
+	for (int attempt = 0; attempt < 24; attempt++) {
+		s64 old = *(volatile s64 *)p;
+		
+		if (old >= *ceil_val) {
+			return old;
+		}
+		s64 new = old + 1;
+		if (__sync_val_compare_and_swap(p, old, new) == old) {
+			return new;
+		}
+	}
+	return *(volatile s64 *)p;
+}
+
 /*
  * Inputs: ctx - context containing sched_switch tracepoint data including prev and next pids
  * Outputs: Returns 0
@@ -72,6 +99,7 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 	__u32 idx;
 	void *collection_map_ptr, *processing_map_ptr;
 	s64 new_count;
+	u64  prev_state;
 
 	ts = bpf_ktime_get_ns();
 
@@ -81,15 +109,18 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 	vcpu = bpf_map_lookup_elem(&vcpus, &incoming_process);
 
 	if (vcpu != NULL) {
-		//we only increment the phantom count if the task was runnable
+		prev_state=ctx->prev_state;
 		
-		if (__sync_bool_compare_and_swap(&vcpu->is_phantom, 1, 0)) {
+		
+
+
+			if (__sync_bool_compare_and_swap(&vcpu->is_phantom, 1, 0)) {
 			// increment phantom count
 			vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
 
 			if (vm != NULL) {
-				char collection_buff[VM_NAME_LEN] = {};
-				char processing_buff[VM_NAME_LEN] = {};
+				char collection_buff_1[VM_NAME_LEN] = {};
+				char collection_buff_2[VM_NAME_LEN] = {};
 				struct phantom_count count = {};
 
 				/* Decrement, but clamp at 0.
@@ -102,45 +133,45 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 #pragma clang loop unroll(full)
 			for (i = 0; i < VM_NAME_LEN - 3; i++) {
 				char c = vcpu->vm_name[i];
-				collection_buff[i] = c;
-				processing_buff[i] = c;
+				collection_buff_1[i] = c;
+				collection_buff_2[i] = c;
 				if (c == '\0')
 					break;
 			}
 
-			// append "_c" for collection buff
-			collection_buff[i] = '_';
-			collection_buff[i + 1] = 'c';
-			collection_buff[i + 2] = '\0';
+			// append "_1" for collection buff 1
+			collection_buff_1[i] = '_';
+			collection_buff_1[i + 1] = '1';
+			collection_buff_1[i + 2] = '\0';
 
-			// append "_p" for processing buff
-			processing_buff[i] = '_';
-			processing_buff[i + 1] = 'p';
-			processing_buff[i + 2] = '\0';
+			// append "_2" for collection buff 2
+			collection_buff_2[i] = '_';
+			collection_buff_2[i + 1] = '2';
+			collection_buff_2[i + 2] = '\0';
 
 			// get the map pointers for the collection and processing buffers
 			collection_map_ptr = bpf_map_lookup_elem(
-				&map_registry, collection_buff);
+				&map_registry, collection_buff_1);
 			if (!collection_map_ptr) {
 				bpf_printk("Error Opening collection buffer\n");
 			}
 
 			processing_map_ptr = bpf_map_lookup_elem(
-				&map_registry, processing_buff);
+				&map_registry, collection_buff_2);
 			if (!processing_map_ptr) {
 				bpf_printk("Error Opening processing buffer\n");
 			}
 
-			// Read is_collecting using volatile to ensure we get the latest value
+			// Read is_collectx_in_buff_1 using volatile to ensure we get the latest value
 			__u32 collecting =
-				*(volatile __u32 *)&vm->is_collecting;
+				*(volatile __u32 *)&vm->is_collectx_in_buff_1;
 			if (collecting == 1) {
-				// use collection map (is_collecting == 1)
+				// use collection map (is_collectx_in_buff_1 == 1)
 				collection_map_ptr = bpf_map_lookup_elem(
-					&map_registry, collection_buff);
+					&map_registry, collection_buff_1);
 				if (collection_map_ptr != NULL) {
 					idx = __sync_fetch_and_add(
-						&vm->collection_index, 1);
+						&vm->collection_buff_1_index, 1);
 
 					count.timestamp = bpf_ktime_get_ns();
 					count.count = new_count;
@@ -154,12 +185,12 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 						count.count, idx);
 				}
 			} else {
-				// use processing map (is_collecting == 0)
+				// use processing map (is_collectx_in_buff_1 == 0)
 				processing_map_ptr = bpf_map_lookup_elem(
-					&map_registry, processing_buff);
+					&map_registry, collection_buff_2);
 				if (processing_map_ptr != NULL) {
 					idx = __sync_fetch_and_add(
-						&vm->processing_index, 1);
+						&vm->collection_buff_2_index, 1);
 
 					count.timestamp = bpf_ktime_get_ns();
 					count.count = new_count;
@@ -175,18 +206,20 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 			}
 		}
 	}
+
+		
+		
+		
 }
 
 	//logic if vcpu is outgoing
 	vcpu = bpf_map_lookup_elem(&vcpus, &outgoing_process);
-	u64  prev_state=ctx->prev_state;
+	  prev_state=ctx->prev_state;
 	if (vcpu != NULL) {
-		if(prev_state==TASK_UNINTERRUPTIBLE || prev_state==TASK_INTERRUPTIBLE){
-			bpf_printk("VCPU sleeping...\n");
-		}
+		
 
 
-		if(prev_state==TASK_RUNNING){
+		if(prev_state==TASK_RUNNING && prev_state==TASK_WAKING){
 			
 		
 		if (__sync_bool_compare_and_swap(&vcpu->is_phantom, 0, 1)) {
@@ -194,55 +227,54 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 			vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
 
 			if (vm != NULL) {
-				char collection_buff[VM_NAME_LEN] = {};
-				char processing_buff[VM_NAME_LEN] = {};
+				char collection_buff_1[VM_NAME_LEN] = {};
+				char collection_buff_2[VM_NAME_LEN] = {};
 				struct phantom_count count = {};
 
-				new_count =
-					__sync_fetch_and_add(&vm->phantom_count, 1) + 1;
+				new_count = atomic_inc_if_lt_ceil(&vm->phantom_count, &vm->nb_vcpus);
 
 #pragma clang loop unroll(full)
 			for (i = 0; i < VM_NAME_LEN - 3; i++) {
 				char c = vcpu->vm_name[i];
-				collection_buff[i] = c;
-				processing_buff[i] = c;
+				collection_buff_1[i] = c;
+				collection_buff_2[i] = c;
 				if (c == '\0')
 					break;
 			}
 
-			// append "_c" for collection buff
-			collection_buff[i] = '_';
-			collection_buff[i + 1] = 'c';
-			collection_buff[i + 2] = '\0';
+			// append "_1" for collection buff 1
+			collection_buff_1[i] = '_';
+			collection_buff_1[i + 1] = '1';
+			collection_buff_1[i + 2] = '\0';
 
-			// append "_p" for processing buff
-			processing_buff[i] = '_';
-			processing_buff[i + 1] = 'p';
-			processing_buff[i + 2] = '\0';
+			// append "_2" for collection buff 2
+			collection_buff_2[i] = '_';
+			collection_buff_2[i + 1] = '2';
+			collection_buff_2[i + 2] = '\0';
 
 			// get the map pointers for the collection and processing buffers
 			collection_map_ptr = bpf_map_lookup_elem(
-				&map_registry, collection_buff);
+				&map_registry, collection_buff_1);
 			if (!collection_map_ptr) {
 				bpf_printk("Error Opening collection buffer\n");
 			}
 
 			processing_map_ptr = bpf_map_lookup_elem(
-				&map_registry, processing_buff);
+				&map_registry, collection_buff_2);
 			if (!processing_map_ptr) {
 				bpf_printk("Error Opening processing buffer\n");
 			}
 
-			// Read is_collecting using volatile to ensure we get the latest value
+			// Read is_collectx_in_buff_1 using volatile to ensure we get the latest value
 			__u32 collecting =
-				*(volatile __u32 *)&vm->is_collecting;
+				*(volatile __u32 *)&vm->is_collectx_in_buff_1;
 			if (collecting == 1) {
-				// use collection map (is_collecting == 1)
+				// use collection map (is_collectx_in_buff_1 == 1)
 				collection_map_ptr = bpf_map_lookup_elem(
-					&map_registry, collection_buff);
+					&map_registry, collection_buff_1);
 				if (collection_map_ptr != NULL) {
 					idx = __sync_fetch_and_add(
-						&vm->collection_index, 1);
+						&vm->collection_buff_1_index, 1);
 
 					count.timestamp = bpf_ktime_get_ns();
 					count.count = new_count;
@@ -256,12 +288,12 @@ int handle_switch(struct trace_event_raw_sched_switch *ctx)
 						count.count, idx);
 				}
 			} else {
-				// use processing map (is_collecting == 0)
+				// use processing map (is_collectx_in_buff_1 == 0)
 				processing_map_ptr = bpf_map_lookup_elem(
-					&map_registry, processing_buff);
+					&map_registry, collection_buff_2);
 				if (processing_map_ptr != NULL) {
 					idx = __sync_fetch_and_add(
-						&vm->processing_index, 1);
+						&vm->collection_buff_2_index, 1);
 
 					count.timestamp = bpf_ktime_get_ns();
 					count.count = new_count;

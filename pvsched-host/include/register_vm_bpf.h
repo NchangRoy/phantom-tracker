@@ -7,15 +7,16 @@
 struct vm_t {
 	char qmp_socket[128];
 	__s64 phantom_count;
-	__u32 collection_index;
-	__u32 processing_index;
-	__u32 is_collecting;
+	__u32 collection_buff_1_index;
+	__u32 collection_buff_2_index;
+	__u32 is_collectx_in_buff_1;
+	__u32 nb_vcpus;
 };
 
 struct vcpu_t {
 	__u32 vcpu_index;
 	char vm_name[VM_NAME_LEN];
-	__u32 is_phantom;
+	__u64 is_phantom;
 };
 
 struct qmp_vpcu {

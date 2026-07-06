@@ -11,9 +11,11 @@ BPF_PROG_CFLAGS ?= -O2 -g -gbtf -Wall -Wextra -Wno-unused-parameter
 
 # Final userspace target (VM registration binary)
 TARGET = bin/register_vm
+CLEANUP_TARGET = bin/cleanup
 
 # Source files for userspace application
 SRCS = user/register_vm.c user/linkedlist.c
+CLEANUP_SRCS = user/cleanup.c user/linkedlist.c
 
 # ============================================================
 # Default target
@@ -84,8 +86,9 @@ bpf: bin/create_maps.loader timer
 #   - eBPF system already built (maps + loader ready)
 # ============================================================
 
-userspace: bin $(SRCS)
+userspace: bin $(SRCS) user/cleanup.c
 	$(CC) $(CFLAGS) $(BPF_CFLAGS) $(INCLUDES) $(SRCS) -o $(TARGET) $(BPF_LDLIBS)
+	$(CC) $(CFLAGS) $(BPF_CFLAGS) $(INCLUDES) user/cleanup.c -o $(CLEANUP_TARGET) $(BPF_LDLIBS)
 
 # ============================================================
 # RUN TARGETS

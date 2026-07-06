@@ -242,7 +242,7 @@ int main(int argc, char *argv[])
 		goto cleanup_fd;
 	}
 
-	if (register_vm(vcpus, vm_name, unix_socket) < 0) {
+	if (register_vm(vcpus, vm_name, unix_socket, nb_vcpus) < 0) {
 		fprintf(stderr, "register_vm failed\n");
 		goto cleanup_fd;
 	}

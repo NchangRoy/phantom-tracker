@@ -6,6 +6,7 @@
 char LICENSE[] SEC("license") = "GPL";
 
 #define CLOCK_BOOTTIME 7
+#define MSG_TIMER_PERIOD_NS 4000000ULL /* 4 ms */
 // timer map and struct
 struct elem {
 	struct bpf_timer timer;
@@ -158,8 +159,8 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 {
 	struct vm_t *vm;
 	const char *vm_name;
-	char collection_buff[VM_NAME_LEN] = {};
-	char processing_buff[VM_NAME_LEN] = {};
+	char collection_buff_1[VM_NAME_LEN] = {};
+	char collection_buff_2[VM_NAME_LEN] = {};
 	int i;
 	struct phantom_count count_end = {};
 	struct phantom_count count_start = {};
@@ -173,24 +174,24 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 #pragma clang loop unroll(full)
 	for (i = 0; i < VM_NAME_LEN - 3; i++) {
 		char c = vm_name[i];
-		collection_buff[i] = c;
-		processing_buff[i] = c;
+		collection_buff_1[i] = c;
+		collection_buff_2[i] = c;
 		if (c == '\0')
 			break;
 	}
 
-	collection_buff[i] = '_';
-	collection_buff[i + 1] = 'c';
-	collection_buff[i + 2] = '\0';
+	collection_buff_1[i] = '_';
+	collection_buff_1[i + 1] = '1';
+	collection_buff_1[i + 2] = '\0';
 
-	processing_buff[i] = '_';
-	processing_buff[i + 1] = 'p';
-	processing_buff[i + 2] = '\0';
+	collection_buff_2[i] = '_';
+	collection_buff_2[i + 1] = '2';
+	collection_buff_2[i + 2] = '\0';
 
 	collection_map_ptr =
-		bpf_map_lookup_elem(&map_registry, collection_buff);
+		bpf_map_lookup_elem(&map_registry, collection_buff_1);
 	processing_map_ptr =
-		bpf_map_lookup_elem(&map_registry, processing_buff);
+		bpf_map_lookup_elem(&map_registry, collection_buff_2);
 
 	if (!collection_map_ptr || !processing_map_ptr)
 		return 0;
@@ -201,39 +202,39 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 	count_start.timestamp = bpf_ktime_get_ns();
 	count_start.count = vm->phantom_count;
 
-	if (vm->is_collecting == 1) {
-		// Currently storing in collection map (1), switch to processing map (0)
-		// Write time_start to new buffer (processing map) at index 0
+	if (vm->is_collectx_in_buff_1 == 1) {
+		// Currently storing in collection_buff_1 map (1), switch to collection_buff_2 map (0)
+		// Write time_start to new buffer (collection_buff_2 map) at index 0
 		__u32 zero = 0;
 		bpf_map_update_elem(processing_map_ptr, &zero, &count_start,
 				    BPF_ANY);
 
-		vm->processing_index = 1; // start next samples at 1
+		vm->collection_buff_2_index = 1; // start next samples at 1
 
-		// Swap is_collecting to 0 atomically so switch handlers start writing to processing map
-		__sync_bool_compare_and_swap(&vm->is_collecting, 1, 0);
+		// Swap is_collectx_in_buff_1 to 0 atomically so switch handlers start writing to collection_buff_2 map
+		__sync_bool_compare_and_swap(&vm->is_collectx_in_buff_1, 1, 0);
 
-		// Reserve index for count_end atomically in the old collection map
-		__u32 end_idx = __sync_fetch_and_add(&vm->collection_index, 1);
+		// Reserve index for count_end atomically in the old collection_buff_1 map
+		__u32 end_idx = __sync_fetch_and_add(&vm->collection_buff_1_index, 1);
 		bpf_map_update_elem(collection_map_ptr, &end_idx,
 				    &count_end, BPF_ANY);
 
 		nb_samples = end_idx;
 		map_to_use = collection_map_ptr;
 	} else {
-		// Currently storing in processing map (0), switch to collection map (1)
-		// Write time_start to new buffer (collection map) at index 0
+		// Currently storing in collection_buff_2 map (0), switch to collection_buff_1 map (1)
+		// Write time_start to new buffer (collection_buff_1 map) at index 0
 		__u32 zero = 0;
 		bpf_map_update_elem(collection_map_ptr, &zero, &count_start,
 				    BPF_ANY);
 
-		vm->collection_index = 1; // start next samples at 1
+		vm->collection_buff_1_index = 1; // start next samples at 1
 
-		// Swap is_collecting to 1 atomically so switch handlers start writing to collection map
-		__sync_bool_compare_and_swap(&vm->is_collecting, 0, 1);
+		// Swap is_collectx_in_buff_1 to 1 atomically so switch handlers start writing to collection_buff_1 map
+		__sync_bool_compare_and_swap(&vm->is_collectx_in_buff_1, 0, 1);
 
-		// Reserve index for count_end atomically in the old processing map
-		__u32 end_idx = __sync_fetch_and_add(&vm->processing_index, 1);
+		// Reserve index for count_end atomically in the old collection_buff_2 map
+		__u32 end_idx = __sync_fetch_and_add(&vm->collection_buff_2_index, 1);
 		bpf_map_update_elem(processing_map_ptr, &end_idx,
 				    &count_end, BPF_ANY);
 
@@ -271,7 +272,7 @@ int timer_init(__u64 *ctx)
 		return 0;
 	}
 	bpf_timer_set_callback(&e->timer, timer_cb);
-	bpf_timer_start(&e->timer, 1000000000ULL, 0);
+	bpf_timer_start(&e->timer, MSG_TIMER_PERIOD_NS, 0);
 	bpf_printk("timer started on first packet\n");
 	return 0;
 }
