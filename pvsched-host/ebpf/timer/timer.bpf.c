@@ -160,33 +160,7 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 	struct vm_t *vm;
 	const char *vm_name;
 	char collection_buff_1[VM_NAME_LEN] = {};
-	char collection_buff_2[VM_NAME_ng peripherals B and D, will contain peripherals A,
-B, C, and D.
-4.3 Compartmentalization Policy and Optimizations
-The compartment policy defines how code, global variables, and peripherals should be grouped into compartments. An example of a security-aware policy is grouping by peripheral, i.e., functions and global variables
-are grouped together based on their access to peripherals. ACES does not impose restriction on policy choice.
-Obviously, the policy affects the performance and isolation of compartments, and, consequently, the security of
-the executable binary image. For example, if two functions which frequently call each other are placed in different code compartments then compartment transitions
-will occur frequently, increasing the overhead. From a
-security perspective, if two sets of global variablesV~1 and
-V~2 are placed in the same compartment and in the original program code region C1 accessed V~1 and C2 accessed
-V~2 then unnecessary access is granted—now both code
-regions can access the entire set of variables. ACES enables the developer to explore the performance-security
-trade-offs of various policies.
-After applying the compartmentalization policy, it
-may be desirable to adjust the resulting compartments.
-These adjustments may improve the security or the performance of the resulting compartmented binary. For example, if performance is too slow it may be desirable to
-merge regions to reduce compartment transitions. To accommodate this, we enable adjustment passes to be applied to the region graph after the compartment formation. Developer-selected optimizations may be applied to
-the region graph. An example of an optimization is the
-transformation from Figure 4c to Figure 4d. It merges
-functions 3 and 4 because they access the same memory
-regions and peripherals. After the optimizations are applied, the resulting region graph is lowered to meet hardware constraints.
-4.4 Lowering to the Final Region Graph
-Lowering is the process by which ACES ensures all
-formed compartments meet the constraints of the targeted hardware. As each compartment consists of a single code vertex and its peripherals and data vertex. Each
-USENIX Association 27th USENIX Security Symposium 69
-code vertex’s out degree must be lower or equal to the
-nLEN] = {};
+	char collection_buff_2[VM_NAME_LEN] = {};
 	int i;
 	struct phantom_count count_end = {};
 	struct phantom_count count_start = {};
