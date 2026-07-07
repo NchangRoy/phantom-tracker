@@ -254,7 +254,7 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
  *              on the first sched_switch event after loading.
  */
 SEC("tp_btf/sched_switch")
-int timer_init(__u64 *ctx)
+int phantom_timer_handler(__u64 *ctx)
 {
 	__u32 key = 0;
 	struct elem *e = bpf_map_lookup_elem(&timer_map, &key);

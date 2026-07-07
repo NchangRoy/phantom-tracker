@@ -83,7 +83,7 @@ static inline s64 atomic_inc_if_lt_ceil(s64 *p, u32 *ceil_val)
  * Description: Tracepoint handler for sched_switch. Increments phantom count on outgoing vCPUs and decrements on incoming vCPUs, records timestamps and updates collection/processing buffers
  */
 SEC("tp/sched/sched_switch")
-int handle_switch(struct trace_event_raw_sched_switch *ctx)
+int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 {
 	__u32 cpu;
 	__u32 incoming_process, outgoing_process;
