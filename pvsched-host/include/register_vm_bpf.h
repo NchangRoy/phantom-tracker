@@ -9,7 +9,7 @@ struct vm_t {
 	__s64 phantom_count;
 	__u32 collection_buff_1_index;
 	__u32 collection_buff_2_index;
-	__u32 is_collectx_in_buff_1;
+	__u64 is_collectx_in_buff_1;
 	__u32 nb_vcpus;
 };
 

@@ -11,7 +11,7 @@ char LICENSE[] SEC("license") = "GPL";
 struct elem {
 	struct bpf_timer timer;
 	__u64 counter;
-	__u32 started;
+	__u64 started;
 };
 
 struct {
@@ -212,7 +212,7 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 		vm->collection_buff_2_index = 1; // start next samples at 1
 
 		// Swap is_collectx_in_buff_1 to 0 atomically so switch handlers start writing to collection_buff_2 map
-		__sync_bool_compare_and_swap(&vm->is_collectx_in_buff_1, 1, 0);
+		__sync_val_compare_and_swap(&vm->is_collectx_in_buff_1, 1, 0);
 
 		// Reserve index for count_end atomically in the old collection_buff_1 map
 		__u32 end_idx = __sync_fetch_and_add(&vm->collection_buff_1_index, 1);
@@ -231,7 +231,7 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 		vm->collection_buff_1_index = 1; // start next samples at 1
 
 		// Swap is_collectx_in_buff_1 to 1 atomically so switch handlers start writing to collection_buff_1 map
-		__sync_bool_compare_and_swap(&vm->is_collectx_in_buff_1, 0, 1);
+		__sync_val_compare_and_swap(&vm->is_collectx_in_buff_1, 0, 1);
 
 		// Reserve index for count_end atomically in the old collection_buff_2 map
 		__u32 end_idx = __sync_fetch_and_add(&vm->collection_buff_2_index, 1);
@@ -262,7 +262,8 @@ int timer_init(__u64 *ctx)
 		return 0;
 
 	// First packet starts the timer, all subsequent packets are ignored
-	if (!__sync_bool_compare_and_swap(&e->started, 0, 1))
+	// __sync_val_compare_and_swap returns the OLD value; if it was already 1, timer is already running.
+	if (__sync_val_compare_and_swap(&e->started, 0, 1) != 0)
 		return 0;
 
 	int ret = bpf_timer_init(&e->timer, &timer_map, CLOCK_BOOTTIME);
