@@ -61,8 +61,9 @@ int main(int argc, char *argv[])
 	// 4. Delete entries from registry map
 	int registry_fd = bpf_obj_get(PIN_REGISTRY);
 	if (registry_fd >= 0) {
-		char key[64];
+		char key[VM_NAME_LEN]; /* must be zero-padded: BPF compares all key_size bytes */
 
+		memset(key, 0, sizeof(key));
 		snprintf(key, sizeof(key), "%s" VM_KEY_SUFFIX_1, vm_name);
 		if (bpf_map_delete_elem(registry_fd, key) < 0) {
 			if (errno != ENOENT) {
@@ -73,6 +74,7 @@ int main(int argc, char *argv[])
 			printf("Deleted registry key: %s\n", key);
 		}
 
+		memset(key, 0, sizeof(key));
 		snprintf(key, sizeof(key), "%s" VM_KEY_SUFFIX_2, vm_name);
 		if (bpf_map_delete_elem(registry_fd, key) < 0) {
 			if (errno != ENOENT) {
@@ -94,7 +96,10 @@ int main(int argc, char *argv[])
 	// 5. Delete entry from VMs map
 	int vm_fd = bpf_obj_get(PIN_VMS);
 	if (vm_fd >= 0) {
-		if (bpf_map_delete_elem(vm_fd, vm_name) < 0) {
+		char vm_key[VM_NAME_LEN]; /* must be zero-padded: BPF compares all key_size bytes */
+		memset(vm_key, 0, sizeof(vm_key));
+		strncpy(vm_key, vm_name, sizeof(vm_key) - 1);
+		if (bpf_map_delete_elem(vm_fd, vm_key) < 0) {
 			if (errno != ENOENT) {
 				perror("bpf_map_delete_elem vms");
 				ret = 1;
