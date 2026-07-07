@@ -171,7 +171,7 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 	vm_name = (const char *)key;
 	vm = (struct vm_t *)value;
 
-#pragma clang loop unroll(full)
+#pragma GCC unroll 64 /* bpf-gcc equivalent of clang loop unroll(full); VM_NAME_LEN=64 */
 	for (i = 0; i < VM_NAME_LEN - 3; i++) {
 		char c = vm_name[i];
 		collection_buff_1[i] = c;
@@ -262,14 +262,14 @@ int timer_init(__u64 *ctx)
 		return 0;
 
 	// First packet starts the timer, all subsequent packets are ignored
-	// __sync_val_compare_and_swap returns the OLD value; if it was already 1, timer is already running.
-	if (__sync_val_compare_and_swap(&e->started, 0, 1) != 0)
+	// test-and-set: atomically write 1, returns old value. If old != 0, timer already running.
+	if (__sync_lock_test_and_set(&e->started, 1) != 0)
 		return 0;
 
 	int ret = bpf_timer_init(&e->timer, &timer_map, CLOCK_BOOTTIME);
 	if (ret) {
 		bpf_printk("timer_init failed: %d\n", ret);
-		__sync_bool_compare_and_swap(&e->started, 1, 0);
+		__sync_val_compare_and_swap(&e->started, 1, 0); // rollback: reset started if init failed
 		return 0;
 	}
 	bpf_timer_set_callback(&e->timer, timer_cb);
