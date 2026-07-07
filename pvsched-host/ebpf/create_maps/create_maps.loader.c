@@ -88,7 +88,7 @@ int main(void)
 		goto cleanup_inner;
 	}
 
-	link = bpf_program__attach_tracepoint(skel->progs.handle_switch,
+	link = bpf_program__attach_tracepoint(skel->progs.phantom_switch_handler,
 					      "sched", "sched_switch");
 	if (!link) {
 		perror("attach tracepoint");

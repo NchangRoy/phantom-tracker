@@ -74,7 +74,7 @@ int main()
 	signal(SIGINT, cleanup);
 	signal(SIGTERM, cleanup);
 
-	prog_link = bpf_program__attach(skel->progs.timer_init);
+	prog_link = bpf_program__attach(skel->progs.phantom_timer_handler);
 	if (libbpf_get_error(prog_link)) {
 		fprintf(stderr, "attach failed\n");
 		prog_link = NULL;
