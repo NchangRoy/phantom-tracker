@@ -86,10 +86,10 @@ if [[ "$ARG_TYPE" == "target" ]]; then
 
     cleanup_target_pvsched_ebpf() {
         echo "Cleaning up BPF maps and registry for VM: $ARG_NAME"
-        local pvsched_host
-        pvsched_host="$(cd "$(dirname "${BASH_SOURCE[0]}")/../pvsched-host" && pwd)"
-        if [[ -x "$pvsched_host/bin/cleanup" ]]; then
-            sudo "$pvsched_host/bin/cleanup" "$ARG_NAME" || true
+        local pvsched_ebpf_host
+        pvsched_ebpf_host="$(cd "$(dirname "${BASH_SOURCE[0]}")/../pvsched-ebpf/host" && pwd)"
+        if [[ -x "$pvsched_ebpf_host/bin/cleanup" ]]; then
+            sudo "$pvsched_ebpf_host/bin/cleanup" "$ARG_NAME" || true
         fi
 
         echo "Stopping background VM monitoring loaders..."
