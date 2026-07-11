@@ -69,16 +69,22 @@ fi
 
 # We use ivshmem for host-guest shared memory and pass host-guest messages using eBPF for target VMs
 if [[ "$ARG_TYPE" == "target" ]]; then
-    check_pkg_config libbpf libbpf-dev fedora=libbpf-devel rhel=libbpf-devel centos=libbpf-devel almalinux=libbpf-devel rocky=libbpf-devel opensuse=libbpf-devel sles=libbpf-devel arch=libbpf alpine=libbpf-dev gentoo=libbpf nixos=libbpf || exit 1
-    check_cmd bpftool   bpftool || exit 1
+    TARGET_DEPS_OK=1
+
+    check_pkg_config libbpf libbpf-dev fedora=libbpf-devel rhel=libbpf-devel centos=libbpf-devel almalinux=libbpf-devel rocky=libbpf-devel opensuse=libbpf-devel sles=libbpf-devel arch=libbpf alpine=libbpf-dev gentoo=libbpf nixos=libbpf || TARGET_DEPS_OK=0
+    check_cmd bpftool   bpftool || TARGET_DEPS_OK=0
     if ! command -v bpf-gcc &>/dev/null && ! command -v bpf-unknown-none-gcc &>/dev/null; then
         echo "error: required BPF compiler not found: bpf-gcc (or bpf-unknown-none-gcc)" >&2
         echo "  install it with:" >&2
         distro_install_hint gcc-bpf fedora=gcc-bpf rhel=gcc centos=gcc almalinux=gcc rocky=gcc opensuse=gcc13 sles=gcc13 arch=gcc alpine=gcc gentoo=sys-devel/gcc nixos=gcc >&2
-        exit 1
+        TARGET_DEPS_OK=0
     fi
 
     . "$(dirname "$0")/create_pvsched_shmem.sh"
+    create_pvsched_shmem_check_deps || TARGET_DEPS_OK=0
+
+    [[ "$TARGET_DEPS_OK" -eq 1 ]] || exit 1
+
     create_pvsched_shmem_setup
 
     cleanup_target_pvsched_shmem() {
