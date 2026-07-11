@@ -24,7 +24,6 @@ fi
 # --- Dependency check ---
 _DEPS_OK=1
 check_cmd qemu-system-x86_64 qemu-system-x86 fedora=qemu-kvm rhel=qemu-kvm centos=qemu-kvm almalinux=qemu-kvm rocky=qemu-kvm || _DEPS_OK=0
-check_cmd numactl   numactl || _DEPS_OK=0
 
 [[ "$_DEPS_OK" -eq 1 ]] || exit 1
 
@@ -46,6 +45,10 @@ declare_arg pin-to-socket     optional "Pin VM to a specific NUMA node" false
 declare_arg socket-nr         optional "NUMA node number (required when --pin-to-socket=true)"
 
 parse_args "$@" # parse all space-separated args
+
+if [[ "$ARG_PIN_TO_SOCKET" == "true" ]]; then
+    check_cmd numactl numactl || exit 1
+fi
 
 if [[ "$ARG_TYPE" != "target" && "$ARG_TYPE" != "noise" ]]; then
     echo "error: --type must be either 'target' or 'noise'" >&2
