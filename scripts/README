@@ -50,7 +50,7 @@ Optional:
   --disk-size=<size>    Disk image size, e.g. 20G (default: 20G).
   --base-image=<path>   Path to base qcow2 cloud image; downloaded from
                         Debian if absent (default: debian-12-generic-amd64.qcow2).
-  --ssh-port=<port>     Host port forwarded to guest SSH (default: 2222).
+  --ssh-port=<port>     Host port forwarded to guest SSH (default: auto-select free port starting at 2222).
   --add-vsock=<bool>    Add a vhost-vsock device (default: false).
   --vsock-cid=<cid>     Guest CID for vhost-vsock. Required when
                         --add-vsock=true.

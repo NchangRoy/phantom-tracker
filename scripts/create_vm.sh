@@ -20,6 +20,7 @@ fi
 . "$(dirname "$0")/lib/args.sh"
 . "$(dirname "$0")/lib/numa.sh"
 . "$(dirname "$0")/lib/cloudinit.sh"
+. "$(dirname "$0")/lib/ssh.sh"
 
 # --- Dependency check ---
 _DEPS_OK=1
@@ -37,7 +38,7 @@ declare_arg threads        optional "Number of threads per core" 1
 declare_arg mem            optional "RAM size (e.g. 4G)" 4G
 declare_arg disk-size      optional "Disk image size (e.g. 20G)" 20G
 declare_arg base-image     optional "Path to base cloud image (downloaded if absent)" "debian-12-generic-amd64.qcow2"
-declare_arg ssh-port       optional "Host port forwarded to guest SSH (port 22)" 2222
+declare_arg ssh-port       optional "Host port forwarded to guest SSH (port 22, auto-selects from 2222 if omitted)" ""
 declare_arg add-vsock      optional "Add a vhost-vsock device to the VM" false
 declare_arg vsock-cid      optional "Guest CID for vhost-vsock (required when --add-vsock=true)" ""
 declare_arg per-vm-cgroups    optional "Use cgroups for the VM" true
@@ -45,6 +46,26 @@ declare_arg pin-to-socket     optional "Pin VM to a specific NUMA node" false
 declare_arg socket-nr         optional "NUMA node number (required when --pin-to-socket=true)"
 
 parse_args "$@" # parse all space-separated args
+
+if [[ -z "${ARG_SSH_PORT:-}" ]]; then
+    ARG_SSH_PORT="$(find_free_tcp_port 2222)"
+    if [[ -z "$ARG_SSH_PORT" ]]; then
+        echo "error: could not find a free host TCP port for SSH forwarding (searched 2222-65535)" >&2
+        exit 1
+    fi
+    echo "ssh-port: auto-selected host port $ARG_SSH_PORT"
+fi
+
+if [[ ! "$ARG_SSH_PORT" =~ ^[0-9]+$ || "$ARG_SSH_PORT" -lt 1 || "$ARG_SSH_PORT" -gt 65535 ]]; then
+    echo "error: --ssh-port must be an integer between 1 and 65535" >&2
+    exit 1
+fi
+
+if tcp_port_is_in_use "$ARG_SSH_PORT"; then
+    echo "error: --ssh-port=$ARG_SSH_PORT is already in use on the host" >&2
+    echo "  choose another port, or omit --ssh-port to auto-select a free one" >&2
+    exit 1
+fi
 
 if [[ "$ARG_PIN_TO_SOCKET" == "true" ]]; then
     check_cmd numactl numactl || exit 1
@@ -134,6 +155,7 @@ fi
 # Print the effective configuration before launching the VM.
 echo "name: $ARG_NAME"
 echo "type: $ARG_TYPE"
+echo "ssh-port: $ARG_SSH_PORT"
 echo "pin-to-socket: $ARG_PIN_TO_SOCKET"
 echo "socket-nr: ${ARG_SOCKET_NR:-}"
 if [[ "$ARG_TYPE" == "target" ]]; then
