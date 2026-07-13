@@ -16,13 +16,12 @@
 #include <linux/vmalloc.h>
 #include <linux/limits.h>
 #include <linux/bpf.h>
-#include <linux/btf.h>
-#include <linux/btf_ids.h>
 #include <linux/string.h>
 #include <linux/debugfs.h>
 
 #define PVSCHED_IVSHMEM_PAGE_SIZE PAGE_SIZE
 #include "pvsched.h"
+#include "ebpf_compatibility.h"
 
 /* grep for the following string in dmesg for debugging */
 #define HOST_IVSHMEM_NAME "host_ivshmem"
@@ -130,19 +129,19 @@ static int host_ivshmem_h2g_write_msg(struct host_ivshmem_backend *backend,
 	return 0;
 }
 
-__bpf_kfunc_start_defs();
+PVSCHED_KFUNC_DEFS_START();
 
-__bpf_kfunc int bpf_host_ivshmem_h2g_write(u32 index,
+PVSCHED_KFUNC int bpf_host_ivshmem_h2g_write(u32 index,
 					const struct hg_message *hg_msg)
 {
 	return host_ivshmem_h2g_write_msg(&backend, index, hg_msg);
 }
 
-__bpf_kfunc_end_defs();
+PVSCHED_KFUNC_DEFS_END();
 
-BTF_KFUNCS_START(bpf_host_ivshmem_kfuncs)
+PVSCHED_KFUNCS_START(bpf_host_ivshmem_kfuncs)
 BTF_ID_FLAGS(func, bpf_host_ivshmem_h2g_write)
-BTF_KFUNCS_END(bpf_host_ivshmem_kfuncs)
+PVSCHED_KFUNCS_END(bpf_host_ivshmem_kfuncs)
 
 static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set  = {
 	.owner = THIS_MODULE,
