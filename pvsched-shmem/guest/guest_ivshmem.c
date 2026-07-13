@@ -19,6 +19,7 @@
  */
 #define PVSCHED_IVSHMEM_PAGE_SIZE PAGE_SIZE
 #include "pvsched.h"
+#include "ebpf_compatibility.h"
 
 /* grep for the following string in dmesg for debugging */
 #define GUEST_IVSHMEM_NAME "guest_ivshmem"
@@ -85,6 +86,72 @@ struct guest_ivshmem_device {
 	u8 __iomem *g2h_page;
 	resource_size_t size;
 };
+
+/*
+ * We assume that the VM contains exactly one ivshmem-plain device. probe()
+ * should publish its initialized state here before the module registers
+ * the kfunc. We also assume that the device remains bound as long as the VM is
+ * running and hence also during the lifetime of guest pvsched-ebpf component
+ * that calls the kfunc.
+ */
+static struct guest_ivshmem_device *guest_ivshmem;
+
+static int guest_ivshmem_g2h_write_msg(
+	u32 index, const struct gh_message *gh_msg)
+{
+	struct guest_ivshmem_device *guest;
+	struct gh_message __iomem *slot;
+
+	guest = READ_ONCE(guest_ivshmem);
+
+	if (!guest || !guest->g2h_page)
+		return -ENODEV;
+
+	if (!gh_msg)
+		return -EINVAL;
+
+	if (index >= NR_GUEST_IVSHMEM_MSGS)
+		return -EINVAL;
+
+	slot = (struct gh_message __iomem *)
+		(guest->g2h_page + index * GUEST_IVSHMEM_MSG_SIZE);
+
+	/*
+	 * vCPU-i writes its 1-word msg in its own cache-line-sized slot, i.e.
+	 * g2h_page[i]->gh_msg->msg.
+	 * The remaining words of its gh_msg are used for padding and are
+   * intentionally left untouched.
+	 */
+  writeq(gh_msg->msg, &slot->msg);
+
+	return 0;
+}
+
+PVSCHED_KFUNC_DEFS_START();
+
+PVSCHED_KFUNC int bpf_guest_ivshmem_g2h_write(
+	u32 index, const struct gh_message *gh_msg)
+{
+	return guest_ivshmem_g2h_write_msg(index, gh_msg);
+}
+
+PVSCHED_KFUNC_DEFS_END();
+
+PVSCHED_KFUNCS_START(bpf_guest_ivshmem_kfuncs)
+BTF_ID_FLAGS(func, bpf_guest_ivshmem_g2h_write)
+PVSCHED_KFUNCS_END(bpf_guest_ivshmem_kfuncs)
+
+static const struct btf_kfunc_id_set bpf_guest_ivshmem_kfunc_id_set = {
+	.owner = THIS_MODULE,
+	.set = &bpf_guest_ivshmem_kfuncs,
+};
+
+static int guest_ivshmem_register_kfuncs(void)
+{
+	return register_btf_kfunc_id_set(
+		BPF_PROG_TYPE_TRACING,
+		&bpf_guest_ivshmem_kfunc_id_set);
+}
 
 /*
  * PCI devices identify themselves using numeric vendor and device IDs.
@@ -193,8 +260,22 @@ static int guest_ivshmem_probe(struct pci_dev *pdev,
 	guest->pdev = pdev;
 	guest->size = size;
 
+	/*
+	 * Remember! That we assume the VM contains exactly one ivshmem-plain device.
+   * So reject an unexpected second device.
+	 */
+	if (READ_ONCE(guest_ivshmem)) {
+		dev_err(&pdev->dev,
+			GUEST_IVSHMEM_NAME
+			": only one ivshmem device is supported\n");
+		ret = -EBUSY;
+		goto err_unmap_g2h;
+	}
+
 	/* Make the per-device state available for the remove callback. */
 	pci_set_drvdata(pdev, guest);
+
+  WRITE_ONCE(guest_ivshmem, guest);
 
 	dev_info(&pdev->dev, GUEST_IVSHMEM_NAME ": successfully mapped BAR%d G2H page: offset %lu, size %lu, %zu messages\n",
 		 GUEST_IVSHMEM_BAR, GUEST_IVSHMEM_G2H_OFFSET,
@@ -203,6 +284,8 @@ static int guest_ivshmem_probe(struct pci_dev *pdev,
 
 	return 0;
 
+err_unmap_g2h:
+	pci_iounmap(pdev, guest->g2h_page);
 err_release_region:
 	pci_release_region(pdev, GUEST_IVSHMEM_BAR);
 err_disable_device:
@@ -222,6 +305,8 @@ static void guest_ivshmem_remove(struct pci_dev *pdev)
   }
 
 	pci_set_drvdata(pdev, NULL);
+	WARN_ON_ONCE(READ_ONCE(guest_ivshmem) != guest);
+  WRITE_ONCE(guest_ivshmem, NULL);
 	pci_iounmap(pdev, guest->g2h_page);
 	pci_release_region(pdev, GUEST_IVSHMEM_BAR);
 	pci_disable_device(pdev);
@@ -269,11 +354,32 @@ static int __init guest_ivshmem_init(void)
    */
 	ret = pci_register_driver(&guest_ivshmem_driver);
 
-	if (ret)
+	if (!READ_ONCE(guest_ivshmem)) {
+		pr_err(GUEST_IVSHMEM_NAME
+		       ": no compatible ivshmem device was found\n");
+		ret = -ENODEV;
+		goto err_unregister_pci_driver;
+	}
+
+	ret = guest_ivshmem_register_kfuncs();
+
+	if (ret) {
+		pr_err(GUEST_IVSHMEM_NAME
+		       ": failed to register BPF kfuncs: %d\n", ret);
+		goto err_unregister_pci_driver;
+	}
+
+	if (ret) {
 		pr_err(GUEST_IVSHMEM_NAME ": failed to register PCI driver: %d\n", ret);
+    goto err_unregister_pci_driver;
+  }
 	else
 		pr_info(GUEST_IVSHMEM_NAME ": loaded the PCI driver\n");
 
+  return 0;
+
+err_unregister_pci_driver:
+  pci_unregister_driver(&guest_ivshmem_driver);
 	return ret;
 }
 
