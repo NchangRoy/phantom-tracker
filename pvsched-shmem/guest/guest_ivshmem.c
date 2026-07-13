@@ -240,6 +240,9 @@ static void guest_ivshmem_remove(struct pci_dev *pdev)
  * identifies the driver in places such as sysfs and kernel messages.
  */
 static struct pci_driver guest_ivshmem_driver = {
+  .driver = {
+    .suppress_bind_attrs = true,
+  },
 	.name = GUEST_IVSHMEM_NAME,
 	.id_table = guest_ivshmem_ids,
 	.probe = guest_ivshmem_probe,
