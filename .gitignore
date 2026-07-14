@@ -78,3 +78,4 @@ pvsched-host/**/*.skel.h
 # =========================
 *.qcow2
 scripts/*.qcow2
+pvsched-ebpf/host/h2g_msg_timer_loader

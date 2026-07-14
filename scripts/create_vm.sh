@@ -20,11 +20,11 @@ fi
 . "$(dirname "$0")/lib/args.sh"
 . "$(dirname "$0")/lib/numa.sh"
 . "$(dirname "$0")/lib/cloudinit.sh"
+. "$(dirname "$0")/lib/ssh.sh"
 
 # --- Dependency check ---
 _DEPS_OK=1
 check_cmd qemu-system-x86_64 qemu-system-x86 fedora=qemu-kvm rhel=qemu-kvm centos=qemu-kvm almalinux=qemu-kvm rocky=qemu-kvm || _DEPS_OK=0
-check_cmd numactl   numactl || _DEPS_OK=0
 
 [[ "$_DEPS_OK" -eq 1 ]] || exit 1
 
@@ -38,7 +38,7 @@ declare_arg threads        optional "Number of threads per core" 1
 declare_arg mem            optional "RAM size (e.g. 4G)" 4G
 declare_arg disk-size      optional "Disk image size (e.g. 20G)" 20G
 declare_arg base-image     optional "Path to base cloud image (downloaded if absent)" "debian-12-generic-amd64.qcow2"
-declare_arg ssh-port       optional "Host port forwarded to guest SSH (port 22)" 2222
+declare_arg ssh-port       optional "Host port forwarded to guest SSH (port 22, auto-selects from 2222 if omitted)" ""
 declare_arg add-vsock      optional "Add a vhost-vsock device to the VM" false
 declare_arg vsock-cid      optional "Guest CID for vhost-vsock (required when --add-vsock=true)" ""
 declare_arg per-vm-cgroups    optional "Use cgroups for the VM" true
@@ -46,6 +46,30 @@ declare_arg pin-to-socket     optional "Pin VM to a specific NUMA node" false
 declare_arg socket-nr         optional "NUMA node number (required when --pin-to-socket=true)"
 
 parse_args "$@" # parse all space-separated args
+
+if [[ -z "${ARG_SSH_PORT:-}" ]]; then
+    ARG_SSH_PORT="$(find_free_tcp_port 2222)"
+    if [[ -z "$ARG_SSH_PORT" ]]; then
+        echo "error: could not find a free host TCP port for SSH forwarding (searched 2222-65535)" >&2
+        exit 1
+    fi
+    echo "ssh-port: auto-selected host port $ARG_SSH_PORT"
+fi
+
+if [[ ! "$ARG_SSH_PORT" =~ ^[0-9]+$ || "$ARG_SSH_PORT" -lt 1 || "$ARG_SSH_PORT" -gt 65535 ]]; then
+    echo "error: --ssh-port must be an integer between 1 and 65535" >&2
+    exit 1
+fi
+
+if tcp_port_is_in_use "$ARG_SSH_PORT"; then
+    echo "error: --ssh-port=$ARG_SSH_PORT is already in use on the host" >&2
+    echo "  choose another port, or omit --ssh-port to auto-select a free one" >&2
+    exit 1
+fi
+
+if [[ "$ARG_PIN_TO_SOCKET" == "true" ]]; then
+    check_cmd numactl numactl || exit 1
+fi
 
 if [[ "$ARG_TYPE" != "target" && "$ARG_TYPE" != "noise" ]]; then
     echo "error: --type must be either 'target' or 'noise'" >&2
@@ -66,16 +90,22 @@ fi
 
 # We use ivshmem for host-guest shared memory and pass host-guest messages using eBPF for target VMs
 if [[ "$ARG_TYPE" == "target" ]]; then
-    check_pkg_config libbpf libbpf-dev fedora=libbpf-devel rhel=libbpf-devel centos=libbpf-devel almalinux=libbpf-devel rocky=libbpf-devel opensuse=libbpf-devel sles=libbpf-devel arch=libbpf alpine=libbpf-dev gentoo=libbpf nixos=libbpf || exit 1
-    check_cmd bpftool   bpftool || exit 1
+    TARGET_DEPS_OK=1
+
+    check_pkg_config libbpf libbpf-dev fedora=libbpf-devel rhel=libbpf-devel centos=libbpf-devel almalinux=libbpf-devel rocky=libbpf-devel opensuse=libbpf-devel sles=libbpf-devel arch=libbpf alpine=libbpf-dev gentoo=libbpf nixos=libbpf || TARGET_DEPS_OK=0
+    check_cmd bpftool   bpftool || TARGET_DEPS_OK=0
     if ! command -v bpf-gcc &>/dev/null && ! command -v bpf-unknown-none-gcc &>/dev/null; then
         echo "error: required BPF compiler not found: bpf-gcc (or bpf-unknown-none-gcc)" >&2
         echo "  install it with:" >&2
         distro_install_hint gcc-bpf fedora=gcc-bpf rhel=gcc centos=gcc almalinux=gcc rocky=gcc opensuse=gcc13 sles=gcc13 arch=gcc alpine=gcc gentoo=sys-devel/gcc nixos=gcc >&2
-        exit 1
+        TARGET_DEPS_OK=0
     fi
 
     . "$(dirname "$0")/create_pvsched_shmem.sh"
+    create_pvsched_shmem_check_deps || TARGET_DEPS_OK=0
+
+    [[ "$TARGET_DEPS_OK" -eq 1 ]] || exit 1
+
     create_pvsched_shmem_setup
 
     cleanup_target_pvsched_shmem() {
@@ -143,6 +173,7 @@ fi
 # Print the effective configuration before launching the VM.
 echo "name: $ARG_NAME"
 echo "type: $ARG_TYPE"
+echo "ssh-port: $ARG_SSH_PORT"
 echo "pin-to-socket: $ARG_PIN_TO_SOCKET"
 echo "socket-nr: ${ARG_SOCKET_NR:-}"
 if [[ "$ARG_TYPE" == "target" ]]; then

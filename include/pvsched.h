@@ -35,13 +35,25 @@ typedef uint64_t pvsched_u64;
 /* 
  * Best effort cache-line-alignment using padding because
  * __attribute__((aligned(...))) is not allowed in eBPF.
+ *
+ * hg_message: Message written by the host and consumed by the guest.
+ * gh_message: Message written by the guest and consumed by the host.
+ *
+ * hg and gh messages currently have the same layout, but defined as
+ * separate types so that either direction can evolve independently.
  */
 struct hg_message {
 	pvsched_u64 msg;
 	pvsched_u64 padding [7];
 };
 
+struct gh_message {
+	pvsched_u64 msg;
+	pvsched_u64 padding[7];
+};
+
 #define HOST_IVSHMEM_MSG_SIZE sizeof(struct hg_message)
+#define GUEST_IVSHMEM_MSG_SIZE sizeof(struct gh_message)
 
 #ifndef PVSCHED_IVSHMEM_PAGE_SIZE
 #error "PVSCHED_IVSHMEM_PAGE_SIZE must be defined by the Makefile for eBPF programs and by the .c file for the kernel module"
@@ -49,6 +61,9 @@ struct hg_message {
 
 #define NR_HOST_IVSHMEM_MSGS \
 		(PVSCHED_IVSHMEM_PAGE_SIZE / HOST_IVSHMEM_MSG_SIZE)
+#define NR_GUEST_IVSHMEM_MSGS \
+		(PVSCHED_IVSHMEM_PAGE_SIZE / GUEST_IVSHMEM_MSG_SIZE)
+
 #define H2G_LATEST_SLOT	0
 #define H2G_FIRST_HISTORY_SLOT	1
 
