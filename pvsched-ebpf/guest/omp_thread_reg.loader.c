@@ -21,6 +21,8 @@
 #define PIN_OMP_THREADS_MAP "/sys/fs/bpf/omp_threads_map"
 #define PIN_MASTER_LINK "/sys/fs/bpf/links/master"
 #define PIN_SWITCH_LINK "/sys/fs/bpf/links/sched_switch"
+#define PIN_EXIT_LINK "/sys/fs/bpf/links/sched_process_exit"
+#define PIN_EXEC_LINK "/sys/fs/bpf/links/sched_process_exec"
 /*
  * find_libgomp - locate the x86-64 libgomp shared library via ldconfig.
  * Filters for x86-64 so it doesn't return the x32 or i386 variant.
@@ -50,6 +52,7 @@ int main(void)
 {
     struct omp_thread_reg_bpf *skel  = NULL;
     struct bpf_link            *link = NULL, *worker_link = NULL, *switch_link = NULL;
+    struct bpf_link            *exit_link = NULL, *exec_link = NULL;
     char    libgomp_path[512] = {0};
     int     err = 0;
     uint64_t worker_offset = 0;
@@ -138,7 +141,38 @@ int main(void)
     }
     printf("Attached → tp/sched/sched_switch          (handle_switch)\n");
 
+    /* 4d — attach sched_process_exit/exec tracepoints (stale TID cleanup) */
+    exit_link = bpf_program__attach(skel->progs.remove_exited_omp_thread);
+    err = libbpf_get_error(exit_link);
+    if (err) {
+        exit_link = NULL;
+        fprintf(stderr, "failed to attach tp/sched/sched_process_exit: %s\n",
+                strerror(-err));
+        goto cleanup;
+    }
+    if (bpf_link__pin(exit_link, PIN_EXIT_LINK) < 0) {
+        perror("pin sched_process_exit link");
+        goto cleanup;
+    }
+    printf("Attached → tp/sched/sched_process_exit    (remove_exited_omp_thread)\n");
+
+    exec_link = bpf_program__attach(skel->progs.remove_execed_omp_thread);
+    err = libbpf_get_error(exec_link);
+    if (err) {
+        exec_link = NULL;
+        fprintf(stderr, "failed to attach tp/sched/sched_process_exec: %s\n",
+                strerror(-err));
+        goto cleanup;
+    }
+    if (bpf_link__pin(exec_link, PIN_EXEC_LINK) < 0) {
+        perror("pin sched_process_exec link");
+        goto cleanup;
+    }
+    printf("Attached → tp/sched/sched_process_exec    (remove_execed_omp_thread)\n");
+
 cleanup:
+    bpf_link__destroy(exec_link);
+    bpf_link__destroy(exit_link);
     bpf_link__destroy(switch_link);
     bpf_link__destroy(worker_link);
     bpf_link__destroy(link);

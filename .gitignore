@@ -46,6 +46,7 @@ user/register_vm
 pvsched-host/bin/
 pvsched-host/**/*.loader
 pvsched-host/**/*.skel.h
+pvsched-ebpf/**/*.loader
 
 # =========================
 # VM / images

@@ -57,6 +57,40 @@ int capture_omp_worker_threads(struct pt_regs *ctx)
 
 	return 0;
 }
+/*
+ * Removes the calling thread's entry from omp_threads_map, if present.
+ * Used to keep the map from misclassifying a TID after it stops being
+ * an OpenMP thread (process exit, TID reuse) or changes identity (exec).
+ */
+static __always_inline void remove_current_tid(void)
+{
+	__u32 tid = (__u32)bpf_get_current_pid_tgid();
+
+	bpf_map_delete_elem(&omp_threads_map, &tid);
+}
+
+/*
+ * A thread exiting frees its TID for reuse by an unrelated future task.
+ * Without this, that future task would inherit the stale OpenMP tag.
+ */
+SEC("tp/sched/sched_process_exit")
+int remove_exited_omp_thread(void *ctx)
+{
+	remove_current_tid();
+	return 0;
+}
+
+/*
+ * execve() keeps the same TID but replaces the task's code entirely,
+ * so a former OpenMP thread's tag is no longer meaningful afterward.
+ */
+SEC("tp/sched/sched_process_exec")
+int remove_execed_omp_thread(void *ctx)
+{
+	remove_current_tid();
+	return 0;
+}
+
 SEC("tp/sched/sched_switch")
 int handle_switch(struct trace_event_raw_sched_switch *ctx)
 {
