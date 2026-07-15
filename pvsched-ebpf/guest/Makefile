@@ -4,6 +4,7 @@ CC ?= gcc
 # -gbtf tells bpf-gcc to embed BTF into the object (bpftool gen skeleton needs it).
 # Plain -g produces only DWARF and will cause the "BTF required" error.
 BPF_CFLAGS ?= -O2 -gbtf -Wall -Wextra -Wno-unused-parameter
+BPF_CFLAGS += -DPVSCHED_IVSHMEM_PAGE_SIZE=$(shell getconf PAGE_SIZE)
 CFLAGS ?= -O2 -g -Wall -Wextra
 
 PROJECT_INCLUDE := ../../include

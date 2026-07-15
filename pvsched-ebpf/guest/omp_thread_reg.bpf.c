@@ -7,8 +7,13 @@
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
+#include "pvsched.h"
 
 char LICENSE[] SEC("license") = "GPL";
+
+/* Kfunc exported by guest_ivshmem.ko */
+extern int bpf_guest_ivshmem_g2h_write(__u32 index,
+					const struct gh_message *gh_msg) __ksym;
 
 /*
  * Map: tid (u32) → cpu index (u32)
@@ -91,21 +96,38 @@ int remove_execed_omp_thread(void *ctx)
 	return 0;
 }
 
-SEC("tp/sched/sched_switch")
-int handle_switch(struct trace_event_raw_sched_switch *ctx)
+/*
+ * bpf_guest_ivshmem_g2h_write() is only registered for
+ * BPF_PROG_TYPE_TRACING programs (see guest_ivshmem.c), which tp_btf/*
+ * programs are but plain tp/sched/sched_switch programs are not — hence
+ * tp_btf here instead of the classic tracepoint format used elsewhere in
+ * this file. Args are read directly from the raw ctx array: ctx[1] is
+ * "struct task_struct *prev", ctx[2] is "struct task_struct *next" (see
+ * TP_PROTO(bool preempt, struct task_struct *prev, struct task_struct
+ * *next, ...) in the kernel's sched_switch tracepoint definition).
+ */
+SEC("tp_btf/sched_switch")
+int handle_switch(__u64 *ctx)
 {
-	__u32 prev_tid = ctx->prev_pid;
-	__u32 next_tid = ctx->next_pid;
+	struct task_struct *prev = (struct task_struct *)ctx[1];
+	struct task_struct *next = (struct task_struct *)ctx[2];
+	__u32 prev_tid = prev->pid;
+	__u32 next_tid = next->pid;
 	__u32 current_cpu = bpf_get_smp_processor_id();
+	struct gh_message gh_msg = {};
 
 	if (bpf_map_lookup_elem(&omp_threads_map, &prev_tid)) {
-		//update ivshmem slot for this cpu set it to 0
+		/* OpenMP thread switched out: cpu is no longer running one */
+		gh_msg.msg = 0;
+		bpf_guest_ivshmem_g2h_write(current_cpu, &gh_msg);
 		bpf_printk("updating ivshmem entry for cpu %d to 0\n",
 			   current_cpu);
 	}
 
 	if (bpf_map_lookup_elem(&omp_threads_map, &next_tid)) {
-		//update ivshmem slot for this cpu set it to 1
+		/* OpenMP thread switched in: cpu is now running one */
+		gh_msg.msg = 1;
+		bpf_guest_ivshmem_g2h_write(current_cpu, &gh_msg);
 		bpf_printk("updating ivshmem entry for cpu %d to 1\n",
 			   current_cpu);
 	}
