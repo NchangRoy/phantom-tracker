@@ -3,12 +3,13 @@
 #include <bpf/bpf_tracing.h>
 #include "phantom_tracker.h"
 #include "register_vm_bpf.h"
+#include"pvsched.h"
 
 char LICENSE[] SEC("license") = "GPL";
 
 #define TASK_RUNNING 0x00000000
 #define TASK_WAKING 0x00000200
-
+extern int bpf_host_ivshmem_g2h_read(__u32 index, struct gh_message * msg ) __ksym;
 // map containing all vms
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
@@ -97,13 +98,22 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 	u64 prev_state;
 
 	ts = bpf_ktime_get_ns();
+	
 
+	
 	incoming_process = ctx->next_pid;
 	outgoing_process = ctx->prev_pid;
 
 	vcpu = bpf_map_lookup_elem(&vcpus, &incoming_process);
 
 	if (vcpu != NULL) {
+
+		//log is current cpu is running a vpcu running an OpenMP thread
+		struct gh_message msg = {};
+		int g2h_ret = bpf_host_ivshmem_g2h_read(vcpu->vcpu_index, &msg);
+		if (g2h_ret == 0)
+			bpf_printk("VCPU #%d OpenMP run state: %llu", vcpu->vcpu_index, msg.msg);
+
 		prev_state = ctx->prev_state;
 
 		if (__sync_bool_compare_and_swap(&vcpu->is_phantom, 1, 0)) {
@@ -181,9 +191,11 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 							collection_map_ptr,
 							&idx, &count, BPF_ANY);
 
+						/*
 						bpf_printk(
 							"Updating collection dec map with count %lld at index %u\n",
 							count.count, idx);
+						*/
 					}
 				} else {
 					// use processing map (is_collectx_in_buff_1 == 0)
@@ -204,9 +216,11 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 							processing_map_ptr,
 							&idx, &count, BPF_ANY);
 
+						/*
 						bpf_printk(
 							"Updating processing dec map with count %lld at index %u\n",
 							count.count, idx);
+						*/
 					}
 				}
 			}
@@ -217,6 +231,14 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 	vcpu = bpf_map_lookup_elem(&vcpus, &outgoing_process);
 	prev_state = ctx->prev_state;
 	if (vcpu != NULL) {
+
+		//log is current cpu is running a vpcu running an OpenMP thread
+		struct gh_message msg = {};
+		int g2h_ret = bpf_host_ivshmem_g2h_read(vcpu->vcpu_index, &msg);
+		if (g2h_ret == 0)
+			bpf_printk("VCPU #%d OpenMP run state: %llu", vcpu->vcpu_index, msg.msg);
+
+			
 		// Only mark as phantom when vCPU was preempted (TASK_RUNNING) — not on voluntary sleep
 		if (prev_state == TASK_RUNNING || prev_state == TASK_WAKING) {
 			if (__sync_bool_compare_and_swap(&vcpu->is_phantom, 0, 1)) {
@@ -292,10 +314,12 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 								&idx, &count,
 								BPF_ANY);
 
+							/*
 							bpf_printk(
 								"Updating collection map inc with count %lld at index %u\n",
 								count.count,
 								idx);
+							*/
 						}
 					} else {
 						// use processing map (is_collectx_in_buff_1 == 0)
@@ -318,10 +342,8 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 								&idx, &count,
 								BPF_ANY);
 
-							bpf_printk(
-								"Updating processing map inc with count %lld at index %u\n",
-								count.count,
-								idx);
+							/*
+							*/
 						}
 					}
 				}

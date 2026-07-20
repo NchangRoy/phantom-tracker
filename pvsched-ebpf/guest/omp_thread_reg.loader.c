@@ -12,10 +12,20 @@
 #include <string.h>
 #include <errno.h>
 #include <stdint.h>
+#include <signal.h>
+#include <unistd.h>
 #include <bpf/libbpf.h>
 #include <bpf/bpf.h>
 #include "omp_thread_reg.skel.h"
 #include "extract_addr.h"
+
+static volatile sig_atomic_t exiting;
+
+static void sig_handler(int sig)
+{
+    (void)sig;
+    exiting = 1;
+}
 
 #define PIN_WORKER_LINK "/sys/fs/bpf/links/worker"
 #define PIN_OMP_THREADS_MAP "/sys/fs/bpf/omp_threads_map"
@@ -56,6 +66,9 @@ int main(void)
     char    libgomp_path[512] = {0};
     int     err = 0;
     uint64_t worker_offset = 0;
+
+    signal(SIGINT, sig_handler);
+    signal(SIGTERM, sig_handler);
 
     /* 1 — find libgomp path */
     if (find_libgomp(libgomp_path, sizeof(libgomp_path)) < 0)
@@ -169,6 +182,10 @@ int main(void)
         goto cleanup;
     }
     printf("Attached → tp/sched/sched_process_exec    (remove_execed_omp_thread)\n");
+
+    printf("All probes attached. Press Ctrl-C to detach and exit...\n");
+    while (!exiting)
+        pause();
 
 cleanup:
     bpf_link__destroy(exec_link);

@@ -136,7 +136,7 @@ static __s64 phantom_average(void *map_ptr, int nb_samples)
 static int timer_cb(void *map, __u32 *key, struct elem *val)
 {
 	val->counter++;
-	bpf_printk("tick: counter=%llu\n", val->counter);
+	//bpf_printk("tick: counter=%llu\n", val->counter);
 
 	// swap collection and processing maps for each vm
 	// iterate through each vm
@@ -261,19 +261,18 @@ int phantom_timer_handler(__u64 *ctx)
 	if (!e)
 		return 0;
 
-	// First packet starts the timer, all subsequent packets are ignored
-	// test-and-set: atomically write 1, returns old value. If old != 0, timer already running.
+	
 	if (__sync_lock_test_and_set(&e->started, 1) != 0)
 		return 0;
 
 	int ret = bpf_timer_init(&e->timer, &timer_map, CLOCK_BOOTTIME);
 	if (ret) {
 		bpf_printk("timer_init failed: %d\n", ret);
-		__sync_val_compare_and_swap(&e->started, 1, 0); // rollback: reset started if init failed
+		__sync_val_compare_and_swap(&e->started, 1, 0); 
 		return 0;
 	}
 	bpf_timer_set_callback(&e->timer, timer_cb);
 	bpf_timer_start(&e->timer, MSG_TIMER_PERIOD_NS, 0);
-	bpf_printk("timer started on first packet\n");
+	
 	return 0;
 }

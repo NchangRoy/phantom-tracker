@@ -5,12 +5,53 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include <errno.h>
 
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 
 #include "register_vm.h"
+
+/*
+ * Unlink every pinned entry inside the per-VM bpffs directory, whatever it
+ * is named. Hardcoding the map names here has drifted out of sync with what
+ * setup_vm_maps() actually pins before (leaving stray files that block the
+ * final rmdir), so just walk the directory instead.
+ */
+static int unlink_dir_contents(const char *dir_path)
+{
+	DIR *dir;
+	struct dirent *entry;
+	char entry_path[320];
+	int ret = 0;
+
+	dir = opendir(dir_path);
+	if (!dir) {
+		if (errno == ENOENT)
+			return 0;
+		perror("opendir VM directory");
+		return -1;
+	}
+
+	while ((entry = readdir(dir)) != NULL) {
+		if (strcmp(entry->d_name, ".") == 0 ||
+		    strcmp(entry->d_name, "..") == 0)
+			continue;
+
+		snprintf(entry_path, sizeof(entry_path), "%s/%s", dir_path,
+			 entry->d_name);
+		if (unlink(entry_path) < 0) {
+			perror("unlink VM directory entry");
+			ret = -1;
+		} else {
+			printf("Unpinned: %s\n", entry_path);
+		}
+	}
+
+	closedir(dir);
+	return ret;
+}
 
 int main(int argc, char *argv[])
 {
@@ -25,30 +66,12 @@ int main(int argc, char *argv[])
 
 	printf("Cleaning up resources for VM: %s\n", vm_name);
 
-	// 1. Unlink collection_buff_1
-	snprintf(path, sizeof(path), "%s/%s/collection_buff_1", PIN_BASE, vm_name);
-	if (unlink(path) < 0) {
-		if (errno != ENOENT) {
-			perror("unlink collection_buff_1");
-			ret = 1;
-		}
-	} else {
-		printf("Unpinned: %s\n", path);
-	}
-
-	// 2. Unlink collection_buff_2
-	snprintf(path, sizeof(path), "%s/%s/collection_buff_2", PIN_BASE, vm_name);
-	if (unlink(path) < 0) {
-		if (errno != ENOENT) {
-			perror("unlink collection_buff_2");
-			ret = 1;
-		}
-	} else {
-		printf("Unpinned: %s\n", path);
-	}
-
-	// 3. Remove per-VM BPF directory
+	// 1. Unlink everything pinned under the per-VM bpffs directory
 	snprintf(path, sizeof(path), "%s/%s", PIN_BASE, vm_name);
+	if (unlink_dir_contents(path) < 0)
+		ret = 1;
+
+	// 2. Remove per-VM BPF directory
 	if (rmdir(path) < 0) {
 		if (errno != ENOENT) {
 			perror("rmdir VM directory");
@@ -58,7 +81,7 @@ int main(int argc, char *argv[])
 		printf("Removed directory: %s\n", path);
 	}
 
-	// 4. Delete entries from registry map
+	// 3. Delete entries from registry map
 	int registry_fd = bpf_obj_get(PIN_REGISTRY);
 	if (registry_fd >= 0) {
 		char key[VM_NAME_LEN]; /* must be zero-padded: BPF compares all key_size bytes */
@@ -93,7 +116,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	// 5. Delete entry from VMs map
+	// 4. Delete entry from VMs map
 	int vm_fd = bpf_obj_get(PIN_VMS);
 	if (vm_fd >= 0) {
 		char vm_key[VM_NAME_LEN]; /* must be zero-padded: BPF compares all key_size bytes */
@@ -115,7 +138,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	// 6. Delete all associated vCPUs from vCPUs map
+	// 5. Delete all associated vCPUs from vCPUs map
 	int vcpus_fd = bpf_obj_get(PIN_VCPUS);
 	if (vcpus_fd >= 0) {
 		cleanup_stale_vcpus(vcpus_fd, vm_name);
