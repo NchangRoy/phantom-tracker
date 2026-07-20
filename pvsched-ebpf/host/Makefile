@@ -8,6 +8,7 @@ CFLAGS ?= -Wall -Wextra -O2 -g
 INCLUDES = -Iuser -Iinclude
 
 BPF_PROG_CFLAGS ?= -O2 -g -gbtf -Wall -Wextra -Wno-unused-parameter
+BPF_PROG_CFLAGS += -DPVSCHED_IVSHMEM_PAGE_SIZE=$(shell getconf PAGE_SIZE)
 
 # Final userspace target (VM registration binary)
 TARGET = bin/register_vm
