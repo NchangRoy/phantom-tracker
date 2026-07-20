@@ -99,6 +99,9 @@ write_files:
       apt install -y git linux-headers-\$(uname -r) linux-source-6.1 dwarves libelf-dev zlib1g-dev libbpf-dev clang
       cd \$HOME
       git clone https://github.com/himadrics/phantom-tracker
+      cd \$HOME/phantom-tracker
+      git checkout Nchang
+      cd \$HOME
 
       mkdir -p \$HOME/src
       tar -C \$HOME/src -xf /usr/src/linux-source-6.1.tar.xz

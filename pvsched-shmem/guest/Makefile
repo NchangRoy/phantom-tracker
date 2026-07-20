@@ -33,6 +33,7 @@ prepare_btf:
 	@test -r "$(BTF_BASE)" || { \
 	  echo "error: base BTF not found at $(BTF_BASE)"; \
 	  exit 1; \
+	
 	}
 	ln -sfn "$(BTF_BASE)" "$(KERNEL_VMLINUX)"
 	@echo "Linked $(KERNEL_VMLINUX) -> $(BTF_BASE)"
