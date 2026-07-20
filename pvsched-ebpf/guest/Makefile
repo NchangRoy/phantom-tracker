@@ -18,7 +18,10 @@ BPF_INCLUDE := -I. -I/usr/include -I$(PROJECT_INCLUDE)
 
 all: omp_thread_reg.loader
 
-omp_thread_reg.bpf.o: omp_thread_reg.bpf.c
+vmlinux.h:
+	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $@
+
+omp_thread_reg.bpf.o: omp_thread_reg.bpf.c vmlinux.h
 	$(BPF_CC) $(BPF_CFLAGS) $(BPF_INCLUDE) -c $< -o $@
 
 omp_thread_reg.skel.h: omp_thread_reg.bpf.o

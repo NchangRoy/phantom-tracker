@@ -95,31 +95,47 @@ write_files:
       export HOME=/root
       mkdir -p /tmp/phantom-tracker/logs
       exec > >(tee -a /tmp/phantom-tracker/logs/guest_ivshmem_driver_setup.log) 2>&1
-      echo "Installing ivshmem driver..."
-      apt install -y git linux-headers-\$(uname -r) linux-source-6.1 dwarves libelf-dev zlib1g-dev libbpf-dev clang
+      echo "******** Installing dependencies ********"
+      apt install -y git linux-headers-\$(uname -r) linux-source-6.1 dwarves libelf-dev zlib1g-dev libbpf-dev clang bpftool
+
+      echo "******** Cloning phantom-tracker repo ********"
       cd \$HOME
       git clone https://github.com/himadrics/phantom-tracker
       cd \$HOME/phantom-tracker
       git checkout Nchang
       cd \$HOME
 
+      echo "******** Building resolve_btfids ********"
       mkdir -p \$HOME/src
       tar -C \$HOME/src -xf /usr/src/linux-source-6.1.tar.xz
       make -C \$HOME/src/linux-source-6.1/tools/bpf/resolve_btfids
 
+      echo "******** Preparing BTF for guest_ivshmem ********"
       cd \$HOME/phantom-tracker/pvsched-shmem/guest
       sudo make prepare_btf
+    
 
       sudo mkdir -p /usr/src/linux-headers-6.1.0-50-amd64/tools/bpf/resolve_btfids
       sudo cp \$HOME/src/linux-source-6.1/tools/bpf/resolve_btfids/resolve_btfids \\
               /usr/src/linux-headers-6.1.0-50-amd64/tools/bpf/resolve_btfids/resolve_btfids
 
+      echo "******** Building guest_ivshmem kernel module  and Resolving it s btf********"
       make V=1
       RESOLVE_BTFIDS=\$HOME/src/linux-source-6.1/tools/bpf/resolve_btfids/resolve_btfids
 
+      echo "******** Installing guest_ivshmem kernel module ********"
       sudo make modules_install
       sudo depmod -a "\$(uname -r)"
       sudo modprobe guest_ivshmem
+
+      echo "******** Building omp_thread_reg BPF program ********"
+      cd \$HOME/phantom-tracker/pvsched-ebpf/guest
+      make
+
+      echo "******** Starting omp_thread_reg BPF program ********"
+      sudo ./omp_thread_reg.loader
+
+      echo "******** guest_ivshmem_driver_setup.sh complete ********"
 runcmd:
   - systemctl enable --now ssh
   - systemctl enable --now qemu-guest-agent
