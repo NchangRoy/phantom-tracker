@@ -104,6 +104,9 @@ static struct host_ivshmem_backend backend = {
 	.minor = 0,
 };
 
+
+
+
 static int host_ivshmem_h2g_write_msg(struct host_ivshmem_backend *backend,
 				 u32 index, const struct hg_message *hg_msg)
 {
@@ -129,6 +132,39 @@ static int host_ivshmem_h2g_write_msg(struct host_ivshmem_backend *backend,
 	return 0;
 }
 
+
+
+
+
+/*Params::
+	@Param1:ivshmem backend structure pointer
+	@Param2:u32 index corresponding to cpu index (cpu slot) we wish to read from the guest-to-host page
+	@Param3:caller-owned buffer that receives the message
+
+*/
+static int host_ivshmem_g2h_read(struct host_ivshmem_backend * backend, u32 index,
+				   struct gh_message * msg){
+	struct gh_message * src;
+	char * g2h_page;
+
+	if (!backend || !backend->mem)
+		return -ENODEV;
+
+	if ( index >= NR_GUEST_IVSHMEM_MSGS)
+		return -EINVAL;
+
+	if (!msg)
+		return -EINVAL;
+
+	g2h_page=(char * )backend->mem+HOST_IVSHMEM_G2H_OFFSET;
+	src=(struct gh_message*)(g2h_page+index*GUEST_IVSHMEM_MSG_SIZE);
+	msg->msg=READ_ONCE(src->msg);
+	return 0;
+
+}
+
+
+//bpf kfuncs registration
 PVSCHED_KFUNC_DEFS_START();
 
 PVSCHED_KFUNC int bpf_host_ivshmem_h2g_write(u32 index,
@@ -137,16 +173,33 @@ PVSCHED_KFUNC int bpf_host_ivshmem_h2g_write(u32 index,
 	return host_ivshmem_h2g_write_msg(&backend, index, hg_msg);
 }
 
+
+PVSCHED_KFUNC int bpf_host_ivshmem_g2h_read(u32 index, struct gh_message *msg){
+	return host_ivshmem_g2h_read(&backend, index, msg);
+}
+
+
+
 PVSCHED_KFUNC_DEFS_END();
+
+
 
 PVSCHED_KFUNCS_START(bpf_host_ivshmem_kfuncs)
 BTF_ID_FLAGS(func, bpf_host_ivshmem_h2g_write)
+BTF_ID_FLAGS(func, bpf_host_ivshmem_g2h_read)
 PVSCHED_KFUNCS_END(bpf_host_ivshmem_kfuncs)
 
 static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set  = {
 	.owner = THIS_MODULE,
 	.set = &bpf_host_ivshmem_kfuncs,
 };
+
+
+
+
+
+
+
 
 static int host_ivshmem_register_kfuncs(void)
 {
