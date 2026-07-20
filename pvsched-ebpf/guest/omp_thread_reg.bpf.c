@@ -66,10 +66,25 @@ int capture_omp_worker_threads(struct pt_regs *ctx)
  * Removes the calling thread's entry from omp_threads_map, if present.
  * Used to keep the map from misclassifying a TID after it stops being
  * an OpenMP thread (process exit, TID reuse) or changes identity (exec).
+ *
+ * sched_process_exit/exec fire while the calling thread is still "current",
+ * before its final sched_switch off this cpu. If we only deleted the map
+ * entry here, handle_switch's prev_tid lookup on that final switch-out
+ * would already miss, so the vCPU's run state would stay stuck at 1.
+ * Write the 0 here instead, while we still know the right cpu and that
+ * this tid was actually tracked.
  */
 static __always_inline void remove_current_tid(void)
 {
 	__u32 tid = (__u32)bpf_get_current_pid_tgid();
+
+	if (bpf_map_lookup_elem(&omp_threads_map, &tid)) {
+		struct gh_message gh_msg = {};
+		__u32 cpu = bpf_get_smp_processor_id();
+
+		gh_msg.msg = 0;
+		bpf_guest_ivshmem_g2h_write(cpu, &gh_msg);
+	}
 
 	bpf_map_delete_elem(&omp_threads_map, &tid);
 }
