@@ -1,10 +1,9 @@
-BPF_CC ?= bpf-gcc
+BPF_CC ?= clang
 CC ?= gcc
 
-# -gbtf tells bpf-gcc to embed BTF into the object (bpftool gen skeleton needs it).
-# Plain -g produces only DWARF and will cause the "BTF required" error.
-BPF_CFLAGS ?= -O2 -gbtf -Wall -Wextra -Wno-unused-parameter
+BPF_CFLAGS ?= -target bpf -O2 -g -Wall -Wextra -Wno-unused-parameter
 BPF_CFLAGS += -DPVSCHED_IVSHMEM_PAGE_SIZE=$(shell getconf PAGE_SIZE)
+
 CFLAGS ?= -O2 -g -Wall -Wextra
 
 PROJECT_INCLUDE := ../../include
@@ -19,15 +18,12 @@ BPF_INCLUDE := -I. -I/usr/include -I$(PROJECT_INCLUDE)
 
 all: omp_thread_reg.loader
 
-# Step 1: compile BPF C -> BPF object (vmlinux.h not needed; standard headers used)
 omp_thread_reg.bpf.o: omp_thread_reg.bpf.c
 	$(BPF_CC) $(BPF_CFLAGS) $(BPF_INCLUDE) -c $< -o $@
 
-# Step 3: generate skeleton header from BPF object
 omp_thread_reg.skel.h: omp_thread_reg.bpf.o
 	bpftool gen skeleton $< > $@
 
-# Step 4: compile userspace loader (depends on skeleton)
 omp_thread_reg.loader: omp_thread_reg.loader.c omp_thread_reg.skel.h
 	$(CC) $(CFLAGS) $(LIBBPF_CFLAGS) -I. $< -o $@ $(LIBBPF_LIBS)
 

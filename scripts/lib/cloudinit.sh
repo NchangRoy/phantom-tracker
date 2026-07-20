@@ -86,9 +86,39 @@ package_upgrade: false
 packages:
   - qemu-guest-agent
   - openssh-server
+write_files:
+  - path: /root/guest_ivshmem_driver_setup.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      mkdir -p /tmp/phantom-tracker/logs
+      exec > >(tee -a /tmp/phantom-tracker/logs/guest_ivshmem_driver_setup.log) 2>&1
+      echo "Installing ivshmem driver..."
+      apt install -y git linux-headers-\$(uname -r) linux-source-6.1 dwarves libelf-dev zlib1g-dev libbpf-dev clang
+      git clone https://github.com/himadrics/phantom-tracker
+
+      mkdir -p ~/src
+      tar -C ~/src -xf /usr/src/linux-source-6.1.tar.xz
+      make -C ~/src/linux-source-6.1/tools/bpf/resolve_btfids
+
+      cd ~/phantom-tracker/pvsched-shmem/guest
+      sudo make prepare_btf
+
+      sudo mkdir -p /usr/src/linux-headers-6.1.0-50-amd64/tools/bpf/resolve_btfids
+      sudo cp \$HOME/src/linux-source-6.1/tools/bpf/resolve_btfids/resolve_btfids \\
+              /usr/src/linux-headers-6.1.0-50-amd64/tools/bpf/resolve_btfids/resolve_btfids
+
+      make V=1
+      RESOLVE_BTFIDS=\$HOME/src/linux-source-6.1/tools/bpf/resolve_btfids/resolve_btfids
+
+      sudo make modules_install
+      sudo depmod -a "\$(uname -r)"
+      sudo modprobe guest_ivshmem
 runcmd:
   - systemctl enable --now ssh
   - systemctl enable --now qemu-guest-agent
+  - /root/guest_ivshmem_driver_setup.sh
 EOF
 
     cat > "$tmpdir/meta-data" <<EOF
