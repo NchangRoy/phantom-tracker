@@ -38,7 +38,7 @@ bin:
 #   3. build loader (userspace program that loads BPF)
 # ============================================================
 
-BPF_INCLUDE = -Iinclude -I/usr/include
+BPF_INCLUDE = -Iinclude -I../../include -I/usr/include
 # Build eBPF loader (userspace program that loads BPF into kernel)
 BPF_CFLAGS := $(shell pkg-config --cflags libbpf)
 BPF_LDLIBS := $(shell pkg-config --libs libbpf)

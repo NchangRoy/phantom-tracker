@@ -34,50 +34,25 @@ modules.order
 *.dwo
 
 # =========================
-# BINARIES (IMPORTANT FIX)
+# BINARIES
 # =========================
 
 bin/
 */bin/
 **/bin/
 
-# specific project binaries (your case)
+# specific project binaries
 user/register_vm
-pvsched-host/bin/
-pvsched-host/**/*.loader
-pvsched-host/**/*.skel.h
-pvsched-ebpf/**/*.loader
+**/*.loader
+**/*.skel.h
+pvsched-ebpf/host/h2g_msg_timer_loader
 
 # =========================
 # VM / images
 # =========================
 *.qcow2
 scripts/*.qcow2
-# VM image artifacts
-*.qcow2
 *.iso
 
 # Generated BPF headers
 vmlinux.h
-pvsched-ebpf/host/h2g_msg_timer_loader
-# =========================
-# BINARIES (IMPORTANT FIX)
-# =========================
-
-bin/
-*/bin/
-**/bin/
-
-# specific project binaries (your case)
-user/register_vm
-pvsched-host/bin/
-pvsched-host/**/*.loader
-pvsched-host/**/*.skel.h
-
-# =========================
-# VM / images
-# =========================
-*.qcow2
-scripts/*.qcow2
-pvsched-ebpf/host/h2g_msg_timer_loader
-*.skel
