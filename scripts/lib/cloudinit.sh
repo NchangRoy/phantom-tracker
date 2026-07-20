@@ -96,13 +96,14 @@ write_files:
       exec > >(tee -a /tmp/phantom-tracker/logs/guest_ivshmem_driver_setup.log) 2>&1
       echo "Installing ivshmem driver..."
       apt install -y git linux-headers-\$(uname -r) linux-source-6.1 dwarves libelf-dev zlib1g-dev libbpf-dev clang
+      cd \$HOME
       git clone https://github.com/himadrics/phantom-tracker
 
-      mkdir -p ~/src
-      tar -C ~/src -xf /usr/src/linux-source-6.1.tar.xz
-      make -C ~/src/linux-source-6.1/tools/bpf/resolve_btfids
+      mkdir -p \$HOME/src
+      tar -C \$HOME/src -xf /usr/src/linux-source-6.1.tar.xz
+      make -C \$HOME/src/linux-source-6.1/tools/bpf/resolve_btfids
 
-      cd ~/phantom-tracker/pvsched-shmem/guest
+      cd \$HOME/phantom-tracker/pvsched-shmem/guest
       sudo make prepare_btf
 
       sudo mkdir -p /usr/src/linux-headers-6.1.0-50-amd64/tools/bpf/resolve_btfids
