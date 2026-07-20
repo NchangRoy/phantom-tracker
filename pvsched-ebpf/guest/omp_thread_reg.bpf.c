@@ -117,16 +117,7 @@ int remove_execed_omp_thread(__u64 *ctx)
 	return 0;
 }
 
-/*
- * bpf_guest_ivshmem_g2h_write() is only registered for
- * BPF_PROG_TYPE_TRACING programs (see guest_ivshmem.c), which tp_btf/*
- * programs are but plain tp/sched/sched_switch programs are not — hence
- * tp_btf here instead of the classic tracepoint format used elsewhere in
- * this file. Args are read directly from the raw ctx array: ctx[1] is
- * "struct task_struct *prev", ctx[2] is "struct task_struct *next" (see
- * TP_PROTO(bool preempt, struct task_struct *prev, struct task_struct
- * *next, ...) in the kernel's sched_switch tracepoint definition).
- */
+
 SEC("tp_btf/sched_switch")
 int handle_switch(__u64 *ctx)
 {
