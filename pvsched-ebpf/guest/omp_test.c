@@ -8,12 +8,26 @@
  */
 #include <stdio.h>
 #include <unistd.h>
+#include <signal.h>
 #include <omp.h>
+
+static volatile sig_atomic_t exiting;
+
+static void sig_handler(int sig)
+{
+    (void)sig;
+    exiting = 1;
+}
 
 int main(void)
 {
+    signal(SIGINT, sig_handler);
+    signal(SIGTERM, sig_handler);
+
     printf("Using %d OpenMP thread(s)  [set OMP_NUM_THREADS to change]\n\n",
            omp_get_max_threads());
+
+    while (!exiting) {
 
     /* --- Region 1: each thread prints its id and cpu --- */
     printf("[region 1] hello from each thread\n");
@@ -66,5 +80,7 @@ int main(void)
     printf("  done\n");
 
     printf("\nAll regions complete. Check trace_pipe for uprobe hits.\n");
+    }
+
     return 0;
 }
