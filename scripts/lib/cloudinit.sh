@@ -92,6 +92,7 @@ write_files:
     content: |
       #!/bin/bash
       set -euo pipefail
+      export HOME=/root
       mkdir -p /tmp/phantom-tracker/logs
       exec > >(tee -a /tmp/phantom-tracker/logs/guest_ivshmem_driver_setup.log) 2>&1
       echo "Installing ivshmem driver..."
