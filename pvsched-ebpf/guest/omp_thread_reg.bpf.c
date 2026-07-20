@@ -93,8 +93,14 @@ static __always_inline void remove_current_tid(void)
  * A thread exiting frees its TID for reuse by an unrelated future task.
  * Without this, that future task would inherit the stale OpenMP tag.
  */
-SEC("tp/sched/sched_process_exit")
-int remove_exited_omp_thread(void *ctx)
+/*
+ * remove_current_tid() calls bpf_guest_ivshmem_g2h_write(), which is only
+ * registered for BPF_PROG_TYPE_TRACING (see guest_ivshmem.c) — so this must
+ * be tp_btf, not the classic tp/sched/sched_process_exit, same reasoning as
+ * handle_switch below.
+ */
+SEC("tp_btf/sched_process_exit")
+int remove_exited_omp_thread(__u64 *ctx)
 {
 	remove_current_tid();
 	return 0;
@@ -104,8 +110,8 @@ int remove_exited_omp_thread(void *ctx)
  * execve() keeps the same TID but replaces the task's code entirely,
  * so a former OpenMP thread's tag is no longer meaningful afterward.
  */
-SEC("tp/sched/sched_process_exec")
-int remove_execed_omp_thread(void *ctx)
+SEC("tp_btf/sched_process_exec")
+int remove_execed_omp_thread(__u64 *ctx)
 {
 	remove_current_tid();
 	return 0;
