@@ -168,7 +168,8 @@ PVSCHED_KFUNC int bpf_host_ivshmem_h2g_write(u32 index,
 	return host_ivshmem_h2g_write_msg(&backend, index, hg_msg);
 }
 
-PVSCHED_KFUNC int bpf_host_ivshmem_g2h_read(u32 index, struct gh_message *msg)
+PVSCHED_KFUNC int bpf_host_ivshmem_g2h_read(u32 index,
+					      struct gh_message *msg)
 {
 	return host_ivshmem_g2h_read(&backend, index, msg);
 }
@@ -176,19 +177,41 @@ PVSCHED_KFUNC int bpf_host_ivshmem_g2h_read(u32 index, struct gh_message *msg)
 PVSCHED_KFUNC_DEFS_END();
 
 PVSCHED_KFUNCS_START(bpf_host_ivshmem_kfuncs)
-BTF_ID_FLAGS(func, bpf_host_ivshmem_h2g_write)
-BTF_ID_FLAGS(func, bpf_host_ivshmem_g2h_read)
+BTF_ID_FLAGS(func, bpf_host_ivshmem_h2g_write, KF_TRUSTED_ARGS)
+BTF_ID_FLAGS(func, bpf_host_ivshmem_g2h_read, KF_TRUSTED_ARGS)
 PVSCHED_KFUNCS_END(bpf_host_ivshmem_kfuncs)
 
-static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set = {
+static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set_kprobe = {
+	.owner = THIS_MODULE,
+	.set = &bpf_host_ivshmem_kfuncs,
+};
+
+static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set_tracepoint = {
+	.owner = THIS_MODULE,
+	.set = &bpf_host_ivshmem_kfuncs,
+};
+
+static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set_tracing = {
 	.owner = THIS_MODULE,
 	.set = &bpf_host_ivshmem_kfuncs,
 };
 
 static int host_ivshmem_register_kfuncs(void)
 {
+	int err;
+
+	err = register_btf_kfunc_id_set(BPF_PROG_TYPE_KPROBE,
+					&bpf_host_ivshmem_kfunc_id_set_kprobe);
+	if (err)
+		return err;
+
+	err = register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACEPOINT,
+					&bpf_host_ivshmem_kfunc_id_set_tracepoint);
+	if (err)
+		return err;
+
 	return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING,
-					 &bpf_host_ivshmem_kfunc_id_set);
+					 &bpf_host_ivshmem_kfunc_id_set_tracing);
 }
 
 static int host_ivshmem_open(struct inode *inode, struct file *file)
