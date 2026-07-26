@@ -213,7 +213,12 @@ static int host_ivshmem_register_kfuncs(void)
 	if (ret)
 		return ret;
 
-	return register_btf_kfunc_id_set(BPF_PROG_TYPE_KPROBE,
+	ret = register_btf_kfunc_id_set(BPF_PROG_TYPE_KPROBE,
+					  &bpf_host_ivshmem_kfunc_id_set);
+	if (ret)
+		return ret;
+
+	return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACEPOINT,
 					  &bpf_host_ivshmem_kfunc_id_set);
 }
 
