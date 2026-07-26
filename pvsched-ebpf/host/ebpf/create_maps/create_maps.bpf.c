@@ -98,8 +98,7 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 	s64 new_count;
 	u64 prev_state;
 
-	ts = bpf_ktime_get_ns();
-
+	
 	incoming_process = ctx->next_pid;
 	outgoing_process = ctx->prev_pid;
 
