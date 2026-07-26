@@ -115,23 +115,20 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 
 	if (msg.msg == 1 &&
 	    __sync_bool_compare_and_swap(&vcpu->is_phantom, 1, 0)) {
-		// Declare buffers here (before lookup) so their zero-init doesn't
-		// spill vm between the null check and its first use, which would
-		// cause the verifier to lose the map_value_or_null -> map_value proof.
+		vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
+		if (!vm)
+			goto check_outgoing;
+
+		/* Decrement, but clamp at 0.
+		 * If phantom_count is 0 the vCPU was already running when
+		 * register_vm populated the map, so we missed the initial
+		 * outgoing event. Skip the decrement to avoid going negative.
+		 */
+		new_count = atomic_dec_if_pos(&vm->phantom_count);
+
 		char collection_buff_1[VM_NAME_LEN] = {};
 		char collection_buff_2[VM_NAME_LEN] = {};
 		struct phantom_count count = {};
-
-		// decrement phantom count
-		vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
-		if (vm != NULL) {
-			/* Decrement, but clamp at 0.
-			 * If phantom_count is 0 the vCPU was already running when
-			 * register_vm populated the map, so we missed the initial
-			 * outgoing event. Skip the decrement to avoid going negative.
-			 */
-
-			new_count = atomic_dec_if_pos(&vm->phantom_count);
 
 #pragma GCC unroll 64
 			for (i = 0; i < VM_NAME_LEN - 3; i++) {
@@ -201,7 +198,6 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 				}
 			}
 		}
-	}
 
 check_outgoing:
 	// logic if vcpu is outgoing
@@ -218,17 +214,16 @@ check_outgoing:
 	if (msg.msg == 1 &&
 	    (prev_state == TASK_RUNNING || prev_state == TASK_WAKING) &&
 	    __sync_bool_compare_and_swap(&vcpu->is_phantom, 0, 1)) {
-		// Declare buffers before lookup — same spill-prevention as incoming block
+		vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
+		if (!vm)
+			return 0;
+
+		new_count = atomic_inc_if_lt_ceil(&vm->phantom_count,
+						  &vm->nb_vcpus);
+
 		char collection_buff_1[VM_NAME_LEN] = {};
 		char collection_buff_2[VM_NAME_LEN] = {};
 		struct phantom_count count = {};
-
-		// increment phantom count
-		vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
-
-		if (vm != NULL) {
-			new_count = atomic_inc_if_lt_ceil(&vm->phantom_count,
-							  &vm->nb_vcpus);
 
 #pragma GCC unroll 64
 			for (i = 0; i < VM_NAME_LEN - 3; i++) {
@@ -308,7 +303,6 @@ check_outgoing:
 				}
 			}
 		}
-	}
 	return 0;
 }
 
@@ -345,12 +339,12 @@ int BPF_KPROBE(phantom_wakeup_handler, struct task_struct *task)
 
 	if (msg.msg == 1 && !(state == TASK_RUNNING) &&
 	    __sync_bool_compare_and_swap(&vcpu->is_phantom, 0, 1)) {
-		// increment phantom count
 		vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
+		if (!vm)
+			return 0;
 
-		if (vm != NULL) {
-			new_count = atomic_inc_if_lt_ceil(&vm->phantom_count,
-							  &vm->nb_vcpus);
+		new_count = atomic_inc_if_lt_ceil(&vm->phantom_count,
+						  &vm->nb_vcpus);
 
 #pragma GCC unroll 64
 			for (i = 0; i < VM_NAME_LEN - 3; i++) {
@@ -418,6 +412,5 @@ int BPF_KPROBE(phantom_wakeup_handler, struct task_struct *task)
 				}
 			}
 		}
-	}
 	return 0;
 }
