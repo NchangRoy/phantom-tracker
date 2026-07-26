@@ -88,9 +88,7 @@ static inline s64 atomic_inc_if_lt_ceil(s64 *p, u32 *ceil_val)
 SEC("tp/sched/sched_switch")
 int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 {
-	__u32 cpu;
 	__u32 incoming_process, outgoing_process;
-	__u64 ts;
 	struct vcpu_t *vcpu;
 	struct vm_t *vm;
 	struct gh_message msg = {};
@@ -110,7 +108,7 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 	if (vcpu != NULL) {
 		//log is current cpu is running a vpcu running an OpenMP thread
 
-		int g2h_ret = bpf_host_ivshmem_g2h_read(vcpu->vcpu_index, &msg);
+		(void)bpf_host_ivshmem_g2h_read(vcpu->vcpu_index, &msg);
 		if (msg.msg == 1)
 			bpf_printk("VCPU #%d OpenMP run state(switch): %llu\n",
 				   vcpu->vcpu_index, msg.msg);
