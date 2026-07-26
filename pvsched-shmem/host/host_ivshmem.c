@@ -181,7 +181,7 @@ BTF_ID_FLAGS(func, bpf_host_ivshmem_h2g_write)
 BTF_ID_FLAGS(func, bpf_host_ivshmem_g2h_read)
 PVSCHED_KFUNCS_END(bpf_host_ivshmem_kfuncs)
 
-static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set_kprobe = {
+static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set_tracepoint = {
 	.owner = THIS_MODULE,
 	.set = &bpf_host_ivshmem_kfuncs,
 };
@@ -195,13 +195,13 @@ static int host_ivshmem_register_kfuncs(void)
 {
 	int err;
 
-	/* phantom_wakeup_handler: SEC("kprobe/...") */
-	err = register_btf_kfunc_id_set(BPF_PROG_TYPE_KPROBE,
-					&bpf_host_ivshmem_kfunc_id_set_kprobe);
+	/* Tracepoint programs: SEC("tp/sched/sched_switch") and SEC("tp/sched/sched_wakeup") */
+	err = register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACEPOINT,
+					&bpf_host_ivshmem_kfunc_id_set_tracepoint);
 	if (err)
 		return err;
 
-	/* phantom_switch_handler: SEC("tp/sched/sched_switch") → TRACING */
+	/* Tracing programs (fentry/fexit/tp_btf) */
 	return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING,
 					 &bpf_host_ivshmem_kfunc_id_set_tracing);
 }

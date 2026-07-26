@@ -313,20 +313,17 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 	return 0;
 }
 
-SEC("kprobe/try_to_wake_up")
-int BPF_KPROBE(phantom_wakeup_handler, struct task_struct *task)
+SEC("tp/sched/sched_wakeup")
+int phantom_wakeup_handler(struct trace_event_raw_sched_wakeup *ctx)
 {
 	struct vm_t *vm = NULL;
 	struct vcpu_t *vcpu = NULL;
-	void *collection_map_ptr, *processing_map_ptr;
-	s64 new_count;
-	__u32 idx;
-	int pid;
-	int state;
-	int i;
+	void *collection_map_ptr = NULL, *processing_map_ptr = NULL;
+	s64 new_count = 0;
+	__u32 idx = 0;
+	int i = 0;
 
-	pid = BPF_CORE_READ(task, pid);
-	state = BPF_CORE_READ(task, __state);
+	__u32 pid = ctx->pid;
 
 	vcpu = bpf_map_lookup_elem(&vcpus, &pid);
 	if (!vcpu)
@@ -337,14 +334,14 @@ int BPF_KPROBE(phantom_wakeup_handler, struct task_struct *task)
 	char collection_buff_2[VM_NAME_LEN] = {};
 	struct phantom_count count = {};
 
-	// log if current cpu is running a vcpu running an OpenMP thread
+	// log if current vcpu is running an OpenMP thread
 	int g2h_ret = bpf_host_ivshmem_g2h_read(vcpu->vcpu_index, &msg);
 	if (g2h_ret == 0)
 		bpf_printk("VCPU #%d OpenMP run state (wakeup): %llu\n",
 			   vcpu->vcpu_index, msg.msg);
-	//check if current vcpu is running an OpenMP thread or is not running
 
-	if (msg.msg == 1 && !(state == TASK_RUNNING) &&
+	// mark as phantom if it's running an OpenMP thread and is not yet running
+	if (msg.msg == 1 &&
 	    __sync_bool_compare_and_swap(&vcpu->is_phantom, 0, 1)) {
 		vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
 		if (!vm)
