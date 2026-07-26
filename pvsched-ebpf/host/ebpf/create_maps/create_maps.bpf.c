@@ -91,7 +91,6 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 	__u32 incoming_process, outgoing_process;
 	struct vcpu_t *vcpu;
 	struct vm_t *vm;
-	struct gh_message msg = {};
 	int i;
 	__u32 idx;
 	void *collection_map_ptr, *processing_map_ptr;
@@ -105,6 +104,7 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 	if (!vcpu)
 		goto check_outgoing;
 
+	struct gh_message msg = {};
 	// log if current cpu is running a vcpu running an OpenMP thread
 	(void)bpf_host_ivshmem_g2h_read(vcpu->vcpu_index, &msg);
 	if (msg.msg == 1)
@@ -317,10 +317,6 @@ int BPF_KPROBE(phantom_wakeup_handler, struct task_struct *task)
 {
 	struct vm_t *vm = NULL;
 	struct vcpu_t *vcpu = NULL;
-	struct gh_message msg = {};
-	char collection_buff_1[VM_NAME_LEN] = {};
-	char collection_buff_2[VM_NAME_LEN] = {};
-	struct phantom_count count = {};
 	void *collection_map_ptr, *processing_map_ptr;
 	s64 new_count;
 	__u32 idx;
@@ -334,6 +330,11 @@ int BPF_KPROBE(phantom_wakeup_handler, struct task_struct *task)
 	vcpu = bpf_map_lookup_elem(&vcpus, &pid);
 	if (!vcpu)
 		return 0;
+
+	struct gh_message msg = {};
+	char collection_buff_1[VM_NAME_LEN] = {};
+	char collection_buff_2[VM_NAME_LEN] = {};
+	struct phantom_count count = {};
 
 	// log if current cpu is running a vcpu running an OpenMP thread
 	int g2h_ret = bpf_host_ivshmem_g2h_read(vcpu->vcpu_index, &msg);
