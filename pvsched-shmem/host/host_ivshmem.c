@@ -196,7 +196,7 @@ static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set = {
 
 static int host_ivshmem_register_kfuncs(void)
 {
-	return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACEPOINT, &bpf_host_ivshmem_kfunc_id_set);
+	return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING, &bpf_host_ivshmem_kfunc_id_set);
 }
 
 
