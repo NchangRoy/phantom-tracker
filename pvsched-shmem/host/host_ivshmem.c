@@ -189,38 +189,52 @@ BTF_ID_FLAGS(func, bpf_host_ivshmem_h2g_write)
 BTF_ID_FLAGS(func, bpf_host_ivshmem_g2h_read)
 PVSCHED_KFUNCS_END(bpf_host_ivshmem_kfuncs)
 
-static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set  = {
+static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set = {
 	.owner = THIS_MODULE,
 	.set = &bpf_host_ivshmem_kfuncs,
 };
 
-
-
-
-
-
-
 /*
-Registering the kfunc for both Kprobe and Tracing bpf programs
+Registering the kfunc for Kprobe, Tracepoint, and Tracing BPF programs
 */
-
 static int host_ivshmem_register_kfuncs(void)
 {
-	int ret;
+	int err;
 
-	ret = register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING,
-					 &bpf_host_ivshmem_kfunc_id_set);
-	if (ret)
-		return ret;
+	/* Allow kprobe programs */
+	err = register_btf_kfunc_id_set(BPF_PROG_TYPE_KPROBE,
+					&bpf_host_ivshmem_kfunc_id_set);
+	if (err)
+		return err;
 
-	ret = register_btf_kfunc_id_set(BPF_PROG_TYPE_KPROBE,
-					  &bpf_host_ivshmem_kfunc_id_set);
-	if (ret)
-		return ret;
+	/* Allow tracepoint programs */
+	err = register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACEPOINT,
+					&bpf_host_ivshmem_kfunc_id_set);
+	if (err)
+		goto unregister_kprobe;
 
-	return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACEPOINT,
-					  &bpf_host_ivshmem_kfunc_id_set);
+	/* Allow tracing programs (fentry/fexit/tp_btf/...) */
+	err = register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING,
+					&bpf_host_ivshmem_kfunc_id_set);
+	if (err)
+		goto unregister_tracepoint;
+
+	return 0;
+
+unregister_tracepoint:
+	unregister_btf_kfunc_id_set(BPF_PROG_TYPE_TRACEPOINT,
+				    &bpf_host_ivshmem_kfunc_id_set);
+unregister_kprobe:
+	unregister_btf_kfunc_id_set(BPF_PROG_TYPE_KPROBE,
+				    &bpf_host_ivshmem_kfunc_id_set);
+	return err;
 }
+
+
+
+
+
+
 
 static int host_ivshmem_open(struct inode *inode, struct file *file)
 {
