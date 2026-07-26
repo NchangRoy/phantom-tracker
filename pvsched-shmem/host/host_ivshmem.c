@@ -200,10 +200,21 @@ static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set  = {
 
 
 
+/*
+Registering the kfunc for both Kprobe and Tracing bpf programs
+*/
 
 static int host_ivshmem_register_kfuncs(void)
 {
-	return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING, &bpf_host_ivshmem_kfunc_id_set);
+	int ret;
+
+	ret = register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING,
+					 &bpf_host_ivshmem_kfunc_id_set);
+	if (ret)
+		return ret;
+
+	return register_btf_kfunc_id_set(BPF_PROG_TYPE_KPROBE,
+					  &bpf_host_ivshmem_kfunc_id_set);
 }
 
 static int host_ivshmem_open(struct inode *inode, struct file *file)
