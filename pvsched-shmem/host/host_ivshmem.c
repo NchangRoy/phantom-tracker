@@ -181,37 +181,15 @@ BTF_ID_FLAGS(func, bpf_host_ivshmem_h2g_write)
 BTF_ID_FLAGS(func, bpf_host_ivshmem_g2h_read)
 PVSCHED_KFUNCS_END(bpf_host_ivshmem_kfuncs)
 
-static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set_kprobe = {
-	.owner = THIS_MODULE,
-	.set = &bpf_host_ivshmem_kfuncs,
-};
-
-static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set_tracepoint = {
-	.owner = THIS_MODULE,
-	.set = &bpf_host_ivshmem_kfuncs,
-};
-
-static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set_tracing = {
+static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set = {
 	.owner = THIS_MODULE,
 	.set = &bpf_host_ivshmem_kfuncs,
 };
 
 static int host_ivshmem_register_kfuncs(void)
 {
-	int err;
-
-	err = register_btf_kfunc_id_set(BPF_PROG_TYPE_KPROBE,
-					&bpf_host_ivshmem_kfunc_id_set_kprobe);
-	if (err)
-		return err;
-
-	err = register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACEPOINT,
-					&bpf_host_ivshmem_kfunc_id_set_tracepoint);
-	if (err)
-		return err;
-
 	return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING,
-					 &bpf_host_ivshmem_kfunc_id_set_tracing);
+					 &bpf_host_ivshmem_kfunc_id_set);
 }
 
 static int host_ivshmem_open(struct inode *inode, struct file *file)
