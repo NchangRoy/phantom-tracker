@@ -171,7 +171,8 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 	vm_name = (const char *)key;
 	vm = (struct vm_t *)value;
 
-#pragma GCC unroll 64 /* bpf-gcc equivalent of clang loop unroll(full); VM_NAME_LEN=64 */
+#pragma GCC \
+	unroll 64 /* bpf-gcc equivalent of clang loop unroll(full); VM_NAME_LEN=64 */
 	for (i = 0; i < VM_NAME_LEN - 3; i++) {
 		char c = vm_name[i];
 		collection_buff_1[i] = c;
@@ -215,9 +216,10 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 		__sync_val_compare_and_swap(&vm->is_collectx_in_buff_1, 1, 0);
 
 		// Reserve index for count_end atomically in the old collection_buff_1 map
-		__u32 end_idx = __sync_fetch_and_add(&vm->collection_buff_1_index, 1);
-		bpf_map_update_elem(collection_map_ptr, &end_idx,
-				    &count_end, BPF_ANY);
+		__u32 end_idx =
+			__sync_fetch_and_add(&vm->collection_buff_1_index, 1);
+		bpf_map_update_elem(collection_map_ptr, &end_idx, &count_end,
+				    BPF_ANY);
 
 		nb_samples = end_idx;
 		map_to_use = collection_map_ptr;
@@ -234,9 +236,10 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 		__sync_val_compare_and_swap(&vm->is_collectx_in_buff_1, 0, 1);
 
 		// Reserve index for count_end atomically in the old collection_buff_2 map
-		__u32 end_idx = __sync_fetch_and_add(&vm->collection_buff_2_index, 1);
-		bpf_map_update_elem(processing_map_ptr, &end_idx,
-				    &count_end, BPF_ANY);
+		__u32 end_idx =
+			__sync_fetch_and_add(&vm->collection_buff_2_index, 1);
+		bpf_map_update_elem(processing_map_ptr, &end_idx, &count_end,
+				    BPF_ANY);
 
 		nb_samples = end_idx;
 		map_to_use = processing_map_ptr;
@@ -261,18 +264,17 @@ int phantom_timer_handler(__u64 *ctx)
 	if (!e)
 		return 0;
 
-	
 	if (__sync_lock_test_and_set(&e->started, 1) != 0)
 		return 0;
 
 	int ret = bpf_timer_init(&e->timer, &timer_map, CLOCK_BOOTTIME);
 	if (ret) {
 		bpf_printk("timer_init failed: %d\n", ret);
-		__sync_val_compare_and_swap(&e->started, 1, 0); 
+		__sync_val_compare_and_swap(&e->started, 1, 0);
 		return 0;
 	}
 	bpf_timer_set_callback(&e->timer, timer_cb);
 	bpf_timer_start(&e->timer, MSG_TIMER_PERIOD_NS, 0);
-	
+
 	return 0;
 }
