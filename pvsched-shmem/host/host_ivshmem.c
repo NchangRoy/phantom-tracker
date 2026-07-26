@@ -194,40 +194,9 @@ static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set = {
 	.set = &bpf_host_ivshmem_kfuncs,
 };
 
-/*
-Registering the kfunc for Kprobe, Tracepoint, and Tracing BPF programs
-*/
 static int host_ivshmem_register_kfuncs(void)
 {
-	int err;
-
-	/* Allow kprobe programs */
-	err = register_btf_kfunc_id_set(BPF_PROG_TYPE_KPROBE,
-					&bpf_host_ivshmem_kfunc_id_set);
-	if (err)
-		return err;
-
-	/* Allow tracepoint programs */
-	err = register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACEPOINT,
-					&bpf_host_ivshmem_kfunc_id_set);
-	if (err)
-		goto unregister_kprobe;
-
-	/* Allow tracing programs (fentry/fexit/tp_btf/...) */
-	err = register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING,
-					&bpf_host_ivshmem_kfunc_id_set);
-	if (err)
-		goto unregister_tracepoint;
-
-	return 0;
-
-unregister_tracepoint:
-	unregister_btf_kfunc_id_set(BPF_PROG_TYPE_TRACEPOINT,
-				    &bpf_host_ivshmem_kfunc_id_set);
-unregister_kprobe:
-	unregister_btf_kfunc_id_set(BPF_PROG_TYPE_KPROBE,
-				    &bpf_host_ivshmem_kfunc_id_set);
-	return err;
+	return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING, &bpf_host_ivshmem_kfunc_id_set);
 }
 
 

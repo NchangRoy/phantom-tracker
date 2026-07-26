@@ -101,7 +101,7 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 	outgoing_process = ctx->prev_pid;
 
 	vcpu = bpf_map_lookup_elem(&vcpus, &incoming_process);
-	if (!vcpu)
+	if (vcpu == NULL)
 		goto check_outgoing;
 
 	struct gh_message msg = {};
@@ -116,7 +116,7 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 	if (msg.msg == 1 &&
 	    __sync_bool_compare_and_swap(&vcpu->is_phantom, 1, 0)) {
 		vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
-		if (!vm)
+		if (vm == NULL)
 			goto check_outgoing;
 
 		/* Decrement, but clamp at 0.
@@ -202,7 +202,7 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 check_outgoing:
 	// logic if vcpu is outgoing
 	vcpu = bpf_map_lookup_elem(&vcpus, &outgoing_process);
-	if (!vcpu)
+	if (vcpu == NULL)
 		return 0;
 	// log if current cpu is running a vcpu running an OpenMP thread
 	(void)bpf_host_ivshmem_g2h_read(vcpu->vcpu_index, &msg);
@@ -215,7 +215,7 @@ check_outgoing:
 	    (prev_state == TASK_RUNNING || prev_state == TASK_WAKING) &&
 	    __sync_bool_compare_and_swap(&vcpu->is_phantom, 0, 1)) {
 		vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
-		if (!vm)
+		if (vm == NULL)
 			return 0;
 
 		new_count = atomic_inc_if_lt_ceil(&vm->phantom_count,
@@ -322,7 +322,7 @@ int BPF_KPROBE(phantom_wakeup_handler, struct task_struct *task)
 	state = BPF_CORE_READ(task, __state);
 
 	vcpu = bpf_map_lookup_elem(&vcpus, &pid);
-	if (!vcpu)
+	if (vcpu == NULL)
 		return 0;
 
 	struct gh_message msg = {};
@@ -340,7 +340,7 @@ int BPF_KPROBE(phantom_wakeup_handler, struct task_struct *task)
 	if (msg.msg == 1 && !(state == TASK_RUNNING) &&
 	    __sync_bool_compare_and_swap(&vcpu->is_phantom, 0, 1)) {
 		vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
-		if (!vm)
+		if (vm == NULL)
 			return 0;
 
 		new_count = atomic_inc_if_lt_ceil(&vm->phantom_count,
