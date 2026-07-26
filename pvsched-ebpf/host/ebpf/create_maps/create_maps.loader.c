@@ -10,7 +10,8 @@
 #include "create_maps.skel.h"
 #include "phantom_tracker.h"
 
-#define PIN_PATH_LINK "/sys/fs/bpf/links/sched_switch_link"
+#define PIN_PATH_LINK        "/sys/fs/bpf/links/sched_switch_link"
+#define PIN_PATH_WAKEUP_LINK "/sys/fs/bpf/links/try_to_wake_up_link"
 
 #define MAP_REGISTRY_MAX_ENTRIES 1000000
 
@@ -22,7 +23,7 @@
 int main(void)
 {
 	struct create_maps_bpf *skel;
-	struct bpf_link *link;
+	struct bpf_link *link, *wakeup_link;
 	int vms_fd, vcpus_fd, registry_fd;
 	int inner_fd;
 	int ret = 1;
@@ -100,6 +101,19 @@ int main(void)
 		goto cleanup_link;
 	}
 
+	wakeup_link = bpf_program__attach_kprobe(
+		skel->progs.phantom_wakeup_handler,
+		false /* entry kprobe */, "try_to_wake_up");
+	if (!wakeup_link) {
+		perror("attach kprobe try_to_wake_up");
+		goto cleanup_link;
+	}
+
+	if (bpf_link__pin(wakeup_link, PIN_PATH_WAKEUP_LINK) < 0) {
+		perror("pin try_to_wake_up link");
+		goto cleanup_wakeup_link;
+	}
+
 	/*
 	 * Pin maps only when they were not already pinned.
 	 */
@@ -107,7 +121,7 @@ int main(void)
 		if (bpf_obj_pin(bpf_map__fd(skel->maps.vms), PIN_PATH_VMS) <
 		    0) {
 			perror("pin vms");
-			goto cleanup_link;
+			goto cleanup_wakeup_link;
 		}
 		printf("pinned vms map\n");
 	}
@@ -116,7 +130,7 @@ int main(void)
 		if (bpf_obj_pin(bpf_map__fd(skel->maps.vcpus), PIN_PATH_VCPUS) <
 		    0) {
 			perror("pin vcpus");
-			goto cleanup_link;
+			goto cleanup_wakeup_link;
 		}
 		printf("pinned vcpus map\n");
 	}
@@ -125,7 +139,7 @@ int main(void)
 		if (bpf_obj_pin(bpf_map__fd(skel->maps.map_registry),
 				PIN_PATH_REGISTRY) < 0) {
 			perror("pin map_registry");
-			goto cleanup_link;
+			goto cleanup_wakeup_link;
 		}
 		printf("pinned map_registry map\n");
 	}
@@ -133,6 +147,8 @@ int main(void)
 	printf("everything loaded successfully\n");
 	ret = 0;
 
+cleanup_wakeup_link:
+	bpf_link__destroy(wakeup_link);
 cleanup_link:
 	bpf_link__destroy(link);
 cleanup_inner:

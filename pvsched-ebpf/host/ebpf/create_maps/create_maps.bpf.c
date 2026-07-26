@@ -2,14 +2,16 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include "phantom_tracker.h"
+#include "bpf/bpf_core_read.h"
 #include "register_vm_bpf.h"
-#include"pvsched.h"
+#include "pvsched.h"
 
 char LICENSE[] SEC("license") = "GPL";
 
 #define TASK_RUNNING 0x00000000
 #define TASK_WAKING 0x00000200
-extern int bpf_host_ivshmem_g2h_read(__u32 index, struct gh_message * msg ) __ksym;
+extern int bpf_host_ivshmem_g2h_read(__u32 index,
+				     struct gh_message *msg) __ksym;
 // map containing all vms
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
@@ -91,6 +93,7 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 	__u64 ts;
 	struct vcpu_t *vcpu;
 	struct vm_t *vm;
+	struct gh_message msg = {};
 	int i;
 	__u32 idx;
 	void *collection_map_ptr, *processing_map_ptr;
@@ -98,25 +101,23 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 	u64 prev_state;
 
 	ts = bpf_ktime_get_ns();
-	
 
-	
 	incoming_process = ctx->next_pid;
 	outgoing_process = ctx->prev_pid;
 
 	vcpu = bpf_map_lookup_elem(&vcpus, &incoming_process);
 
 	if (vcpu != NULL) {
-
 		//log is current cpu is running a vpcu running an OpenMP thread
-		struct gh_message msg = {};
+
 		int g2h_ret = bpf_host_ivshmem_g2h_read(vcpu->vcpu_index, &msg);
-		if (g2h_ret == 0)
-			bpf_printk("VCPU #%d OpenMP run state: %llu", vcpu->vcpu_index, msg.msg);
+		if (msg.msg == 1)
+			bpf_printk("VCPU #%d OpenMP run state(switch): %llu\n",
+				   vcpu->vcpu_index, msg.msg);
 
 		prev_state = ctx->prev_state;
 
-		if (__sync_bool_compare_and_swap(&vcpu->is_phantom, 1, 0)) {
+		if ( msg.msg ==1 &&  __sync_bool_compare_and_swap(&vcpu->is_phantom, 1, 0)) {
 			// Declare buffers here (before lookup) so their zero-init doesn't
 			// spill vm between the null check and its first use, which would
 			// cause the verifier to lose the map_value_or_null -> map_value proof.
@@ -133,6 +134,9 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 				 * register_vm populated the map, so we missed the initial
 				 * outgoing event. Skip the decrement to avoid going negative.
 				 */
+
+				
+
 				new_count =
 					atomic_dec_if_pos(&vm->phantom_count);
 
@@ -231,17 +235,16 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 	vcpu = bpf_map_lookup_elem(&vcpus, &outgoing_process);
 	prev_state = ctx->prev_state;
 	if (vcpu != NULL) {
-
 		//log is current cpu is running a vpcu running an OpenMP thread
 		struct gh_message msg = {};
 		int g2h_ret = bpf_host_ivshmem_g2h_read(vcpu->vcpu_index, &msg);
 		if (g2h_ret == 0)
-			bpf_printk("VCPU #%d OpenMP run state: %llu", vcpu->vcpu_index, msg.msg);
+			bpf_printk("VCPU #%d OpenMP run state (switch): %llu\n",
+				   vcpu->vcpu_index, msg.msg);
 
-			
-		// Only mark as phantom when vCPU was preempted (TASK_RUNNING) — not on voluntary sleep
-		if (prev_state == TASK_RUNNING || prev_state == TASK_WAKING) {
-			if (__sync_bool_compare_and_swap(&vcpu->is_phantom, 0, 1)) {
+		// set vCPU as phantom if it is running an OpenMP thread and was preempted (RUNNING or WAKING)
+		if (msg.msg==1 && (prev_state == TASK_RUNNING || prev_state == TASK_WAKING) && __sync_bool_compare_and_swap(&vcpu->is_phantom, 0,
+							 1)) {
 				// Declare buffers before lookup — same spill-prevention as incoming block
 				char collection_buff_1[VM_NAME_LEN] = {};
 				char collection_buff_2[VM_NAME_LEN] = {};
@@ -250,6 +253,8 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 				// increment phantom count
 				vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
 
+				
+				
 				if (vm != NULL) {
 					new_count = atomic_inc_if_lt_ceil(
 						&vm->phantom_count,
@@ -294,19 +299,22 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 					}
 
 					// Plain field read — vm is map_value (non-null) here
-					__u64 collecting = vm->is_collectx_in_buff_1;
+					__u64 collecting =
+						vm->is_collectx_in_buff_1;
 					if (collecting == 1) {
 						// use collection map (is_collectx_in_buff_1 == 1)
 						collection_map_ptr =
 							bpf_map_lookup_elem(
 								&map_registry,
 								collection_buff_1);
-						if (collection_map_ptr !=  NULL) {
+						if (collection_map_ptr !=
+						    NULL) {
 							idx = __sync_fetch_and_add(
 								&vm->collection_buff_1_index,
 								1);
 
-							count.timestamp =								bpf_ktime_get_ns();
+							count.timestamp =
+								bpf_ktime_get_ns();
 							count.count = new_count;
 
 							bpf_map_update_elem(
@@ -345,6 +353,123 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 							/*
 							*/
 						}
+					}
+				}
+		}
+	}
+	return 0;
+}
+
+SEC("kprobe/try_to_wake_up")
+int BPF_KPROBE(phantom_wakeup_handler, struct task_struct *task)
+{
+	struct vm_t *vm = NULL;
+	struct vcpu_t *vcpu = NULL;
+	struct gh_message msg = {};
+	char collection_buff_1[VM_NAME_LEN] = {};
+	char collection_buff_2[VM_NAME_LEN] = {};
+	struct phantom_count count = {};
+	void *collection_map_ptr, *processing_map_ptr;
+	s64 new_count;
+	__u32 idx;
+	int pid;
+	int state;
+	int i;
+
+	pid = BPF_CORE_READ(task, pid);
+	state = BPF_CORE_READ(task, __state);
+
+	vcpu = bpf_map_lookup_elem(&vcpus, &pid);
+	if (vcpu != NULL) {
+		// log if current cpu is running a vcpu running an OpenMP thread
+		int g2h_ret = bpf_host_ivshmem_g2h_read(vcpu->vcpu_index, &msg);
+		if (g2h_ret == 0)
+			bpf_printk("VCPU #%d OpenMP run state (wakeup): %llu\n",
+				   vcpu->vcpu_index, msg.msg);
+		//check if current vcpu is running an OpenMP thread or is not running 
+		
+	
+		if (msg.msg == 1 && !(state == TASK_RUNNING) && __sync_bool_compare_and_swap(&vcpu->is_phantom, 0, 1)) {
+			// increment phantom count
+			vm = bpf_map_lookup_elem(&vms, vcpu->vm_name);
+
+			
+
+			if (vm != NULL) {
+				new_count = atomic_inc_if_lt_ceil(
+					&vm->phantom_count, &vm->nb_vcpus);
+
+#pragma GCC unroll 64
+				for (i = 0; i < VM_NAME_LEN - 3; i++) {
+					char c = vcpu->vm_name[i];
+					collection_buff_1[i] = c;
+					collection_buff_2[i] = c;
+					if (c == '\0')
+						break;
+				}
+
+				// append "_1" for collection buff 1
+				collection_buff_1[i] = '_';
+				collection_buff_1[i + 1] = '1';
+				collection_buff_1[i + 2] = '\0';
+
+				// append "_2" for collection buff 2
+				collection_buff_2[i] = '_';
+				collection_buff_2[i + 1] = '2';
+				collection_buff_2[i + 2] = '\0';
+
+				// get the map pointers for the collection and processing buffers
+				collection_map_ptr = bpf_map_lookup_elem(
+					&map_registry, collection_buff_1);
+				if (!collection_map_ptr)
+					bpf_printk(
+						"Error Opening collection buffer\n");
+
+				processing_map_ptr = bpf_map_lookup_elem(
+					&map_registry, collection_buff_2);
+				if (!processing_map_ptr)
+					bpf_printk(
+						"Error Opening processing buffer\n");
+
+				// Plain field read — vm is map_value (non-null) here
+				__u64 collecting = vm->is_collectx_in_buff_1;
+				if (collecting == 1) {
+					// use collection map (is_collectx_in_buff_1 == 1)
+					collection_map_ptr =
+						bpf_map_lookup_elem(
+							&map_registry,
+							collection_buff_1);
+					if (collection_map_ptr != NULL) {
+						idx = __sync_fetch_and_add(
+							&vm->collection_buff_1_index,
+							1);
+
+						count.timestamp =
+							bpf_ktime_get_ns();
+						count.count = new_count;
+
+						bpf_map_update_elem(
+							collection_map_ptr,
+							&idx, &count, BPF_ANY);
+					}
+				} else {
+					// use processing map (is_collectx_in_buff_1 == 0)
+					processing_map_ptr =
+						bpf_map_lookup_elem(
+							&map_registry,
+							collection_buff_2);
+					if (processing_map_ptr != NULL) {
+						idx = __sync_fetch_and_add(
+							&vm->collection_buff_2_index,
+							1);
+
+						count.timestamp =
+							bpf_ktime_get_ns();
+						count.count = new_count;
+
+						bpf_map_update_elem(
+							processing_map_ptr,
+							&idx, &count, BPF_ANY);
 					}
 				}
 			}
