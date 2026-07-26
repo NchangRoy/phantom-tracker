@@ -227,12 +227,11 @@ static int host_ivshmem_register_kfuncs(void)
 		return err;
 	}
 
-	/* Allow tracing programs (fentry/fexit/tp_btf/...) */
+	/* Allow tracing programs (fentry/fexit/tp_btf/...) - optional */
 	err = register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING,
 					&bpf_host_ivshmem_kfunc_id_set_tracing);
 	if (err) {
-		pr_err("host_ivshmem: failed to register TRACING kfuncs: %d\n", err);
-		return err;
+		pr_info("host_ivshmem: TRACING kfuncs registration skipped (%d), continuing with KPROBE/TRACEPOINT\n", err);
 	}
 
 	return 0;
