@@ -88,14 +88,14 @@ static inline s64 atomic_inc_if_lt_ceil(s64 *p, u32 *ceil_val)
 SEC("tp/sched/sched_switch")
 int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 {
-	__u32 incoming_process, outgoing_process;
-	struct vcpu_t *vcpu;
-	struct vm_t *vm;
-	int i;
-	__u32 idx;
-	void *collection_map_ptr, *processing_map_ptr;
-	s64 new_count;
-	u64 prev_state;
+	__u32 incoming_process = 0, outgoing_process = 0;
+	struct vcpu_t *vcpu = NULL;
+	struct vm_t *vm = NULL;
+	int i = 0;
+	__u32 idx = 0;
+	void *collection_map_ptr = NULL, *processing_map_ptr = NULL;
+	s64 new_count = 0;
+	u64 prev_state = 0;
 
 	incoming_process = ctx->next_pid;
 	outgoing_process = ctx->prev_pid;
