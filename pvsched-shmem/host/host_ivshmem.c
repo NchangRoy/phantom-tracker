@@ -104,11 +104,9 @@ static struct host_ivshmem_backend backend = {
 	.minor = 0,
 };
 
-
-
-
 static int host_ivshmem_h2g_write_msg(struct host_ivshmem_backend *backend,
-				 u32 index, const struct hg_message *hg_msg)
+				      u32 index,
+				      const struct hg_message *hg_msg)
 {
 	struct hg_message *history, *latest;
 	char *h2g_page;
@@ -122,9 +120,11 @@ static int host_ivshmem_h2g_write_msg(struct host_ivshmem_backend *backend,
 	if (index == H2G_LATEST_SLOT || index >= NR_HOST_IVSHMEM_MSGS)
 		return -EINVAL;
 
-	h2g_page = (char *) backend->mem + HOST_IVSHMEM_H2G_OFFSET;
-	history = (struct hg_message *)(h2g_page + index * HOST_IVSHMEM_MSG_SIZE);
-	latest = (struct hg_message *)(h2g_page + H2G_LATEST_SLOT * HOST_IVSHMEM_MSG_SIZE);
+	h2g_page = (char *)backend->mem + HOST_IVSHMEM_H2G_OFFSET;
+	history =
+		(struct hg_message *)(h2g_page + index * HOST_IVSHMEM_MSG_SIZE);
+	latest = (struct hg_message *)(h2g_page +
+				       H2G_LATEST_SLOT * HOST_IVSHMEM_MSG_SIZE);
 
 	WRITE_ONCE(history->msg, hg_msg->msg);
 	smp_store_release(&latest->msg, hg_msg->msg);
@@ -132,57 +132,48 @@ static int host_ivshmem_h2g_write_msg(struct host_ivshmem_backend *backend,
 	return 0;
 }
 
-
-
-
-
 /*Params::
 	@Param1:ivshmem backend structure pointer
 	@Param2:u32 index corresponding to cpu index (cpu slot) we wish to read from the guest-to-host page
 	@Param3:caller-owned buffer that receives the message
 
 */
-static int host_ivshmem_g2h_read(struct host_ivshmem_backend * backend, u32 index,
-				   struct gh_message * msg){
-	struct gh_message * src;
-	char * g2h_page;
+static int host_ivshmem_g2h_read(struct host_ivshmem_backend *backend,
+				 u32 index, struct gh_message *msg)
+{
+	struct gh_message *src;
+	char *g2h_page;
 
 	if (!backend || !backend->mem)
 		return -ENODEV;
 
-	if ( index >= NR_GUEST_IVSHMEM_MSGS)
+	if (index >= NR_GUEST_IVSHMEM_MSGS)
 		return -EINVAL;
 
 	if (!msg)
 		return -EINVAL;
 
-	g2h_page=(char * )backend->mem+HOST_IVSHMEM_G2H_OFFSET;
-	src=(struct gh_message*)(g2h_page+index*GUEST_IVSHMEM_MSG_SIZE);
-	msg->msg=READ_ONCE(src->msg);
+	g2h_page = (char *)backend->mem + HOST_IVSHMEM_G2H_OFFSET;
+	src = (struct gh_message *)(g2h_page + index * GUEST_IVSHMEM_MSG_SIZE);
+	msg->msg = READ_ONCE(src->msg);
 	return 0;
-
 }
-
 
 //bpf kfuncs registration
 PVSCHED_KFUNC_DEFS_START();
 
 PVSCHED_KFUNC int bpf_host_ivshmem_h2g_write(u32 index,
-					const struct hg_message *hg_msg)
+					     const struct hg_message *hg_msg)
 {
 	return host_ivshmem_h2g_write_msg(&backend, index, hg_msg);
 }
 
-
-PVSCHED_KFUNC int bpf_host_ivshmem_g2h_read(u32 index, struct gh_message *msg){
+PVSCHED_KFUNC int bpf_host_ivshmem_g2h_read(u32 index, struct gh_message *msg)
+{
 	return host_ivshmem_g2h_read(&backend, index, msg);
 }
 
-
-
 PVSCHED_KFUNC_DEFS_END();
-
-
 
 PVSCHED_KFUNCS_START(bpf_host_ivshmem_kfuncs)
 BTF_ID_FLAGS(func, bpf_host_ivshmem_h2g_write)
@@ -196,14 +187,9 @@ static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set = {
 
 static int host_ivshmem_register_kfuncs(void)
 {
-	return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING, &bpf_host_ivshmem_kfunc_id_set);
+	return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING,
+					 &bpf_host_ivshmem_kfunc_id_set);
 }
-
-
-
-
-
-
 
 static int host_ivshmem_open(struct inode *inode, struct file *file)
 {
@@ -270,7 +256,7 @@ static int host_ivshmem_create_static_backend(void)
 		goto err_free_mem;
 
 	backend.dev = device_create(host_ivshmem_class, NULL, devt, &backend,
-					    "host_ivshmem%d", backend.minor);
+				    "host_ivshmem%d", backend.minor);
 
 	if (IS_ERR(backend.dev)) {
 		ret = PTR_ERR(backend.dev);
@@ -282,9 +268,9 @@ static int host_ivshmem_create_static_backend(void)
 	backend.debugfs_blob.size = backend.size;
 
 	if (host_ivshmem_debugfs_root) {
-		backend.debugfs_dentry = debugfs_create_blob("host_ivshmem_blob_vm0",
-							0400, host_ivshmem_debugfs_root,
-							&backend.debugfs_blob);
+		backend.debugfs_dentry = debugfs_create_blob(
+			"host_ivshmem_blob_vm0", 0400,
+			host_ivshmem_debugfs_root, &backend.debugfs_blob);
 
 		/* Even if debugfs blob creation fails, the device should still function */
 		if (IS_ERR_OR_NULL(backend.debugfs_dentry)) {
@@ -327,14 +313,14 @@ static void host_ivshmem_destroy_static_backend(void)
 
 static int __init host_ivshmem_init(void)
 {
-  int ret;
-	
+	int ret;
+
 	/* Sanity check in case the user alters MSG_SIZE! */
 	if (PAGE_SIZE % HOST_IVSHMEM_MSG_SIZE) {
-			pr_err("host_ivshmem: PAGE_SIZE (%lu) is not a multiple of HOST_IVSHMEM_MSG_SIZE (%zu)\n",
-				PAGE_SIZE, HOST_IVSHMEM_MSG_SIZE);
-			return -EINVAL;
-		}
+		pr_err("host_ivshmem: PAGE_SIZE (%lu) is not a multiple of HOST_IVSHMEM_MSG_SIZE (%zu)\n",
+		       PAGE_SIZE, HOST_IVSHMEM_MSG_SIZE);
+		return -EINVAL;
+	}
 
 	/* 
 		* Reserve a range of character-device numbers for this module.
@@ -345,9 +331,8 @@ static int __init host_ivshmem_init(void)
 		* range, and userspace will access them via the corresponding
 		* /dev/host_ivshmem* nodes and manage them via /sys/class/host_ivshmem.
 		*/
-	ret = alloc_chrdev_region(&host_ivshmem_devt, 0,
-				HOST_IVSHMEM_MAX_DEVS,
-				HOST_IVSHMEM_NAME);
+	ret = alloc_chrdev_region(&host_ivshmem_devt, 0, HOST_IVSHMEM_MAX_DEVS,
+				  HOST_IVSHMEM_NAME);
 
 	if (ret)
 		return ret;
@@ -371,7 +356,8 @@ static int __init host_ivshmem_init(void)
 	ret = host_ivshmem_create_static_backend();
 
 	if (ret) {
-		pr_err("host_ivshmem: failed to create static backend: %d\n", ret);
+		pr_err("host_ivshmem: failed to create static backend: %d\n",
+		       ret);
 		goto err_destroy_class;
 	}
 
@@ -382,8 +368,7 @@ static int __init host_ivshmem_init(void)
 		goto err_destroy_backend;
 	}
 
-	pr_info("host_ivshmem: loaded major=%u\n",
-		MAJOR(host_ivshmem_devt));
+	pr_info("host_ivshmem: loaded major=%u\n", MAJOR(host_ivshmem_devt));
 
 	return 0;
 
@@ -396,7 +381,7 @@ err_destroy_class:
 	host_ivshmem_class = NULL;
 err_unregister_chrdev:
 	unregister_chrdev_region(host_ivshmem_devt, HOST_IVSHMEM_MAX_DEVS);
-	return ret;    
+	return ret;
 }
 
 static void __exit host_ivshmem_exit(void)
