@@ -189,7 +189,17 @@ BTF_ID_FLAGS(func, bpf_host_ivshmem_h2g_write)
 BTF_ID_FLAGS(func, bpf_host_ivshmem_g2h_read)
 PVSCHED_KFUNCS_END(bpf_host_ivshmem_kfuncs)
 
-static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set = {
+static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set_kprobe = {
+	.owner = THIS_MODULE,
+	.set = &bpf_host_ivshmem_kfuncs,
+};
+
+static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set_tracepoint = {
+	.owner = THIS_MODULE,
+	.set = &bpf_host_ivshmem_kfuncs,
+};
+
+static const struct btf_kfunc_id_set bpf_host_ivshmem_kfunc_id_set_tracing = {
 	.owner = THIS_MODULE,
 	.set = &bpf_host_ivshmem_kfuncs,
 };
@@ -203,19 +213,29 @@ static int host_ivshmem_register_kfuncs(void)
 
 	/* Allow kprobe programs */
 	err = register_btf_kfunc_id_set(BPF_PROG_TYPE_KPROBE,
-					&bpf_host_ivshmem_kfunc_id_set);
-	if (err)
+					&bpf_host_ivshmem_kfunc_id_set_kprobe);
+	if (err) {
+		pr_err("host_ivshmem: failed to register KPROBE kfuncs: %d\n", err);
 		return err;
+	}
 
 	/* Allow tracepoint programs */
 	err = register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACEPOINT,
-					&bpf_host_ivshmem_kfunc_id_set);
-	if (err)
+					&bpf_host_ivshmem_kfunc_id_set_tracepoint);
+	if (err) {
+		pr_err("host_ivshmem: failed to register TRACEPOINT kfuncs: %d\n", err);
 		return err;
+	}
 
 	/* Allow tracing programs (fentry/fexit/tp_btf/...) */
-	return register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING,
-					  &bpf_host_ivshmem_kfunc_id_set);
+	err = register_btf_kfunc_id_set(BPF_PROG_TYPE_TRACING,
+					&bpf_host_ivshmem_kfunc_id_set_tracing);
+	if (err) {
+		pr_err("host_ivshmem: failed to register TRACING kfuncs: %d\n", err);
+		return err;
+	}
+
+	return 0;
 }
 
 
