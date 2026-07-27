@@ -115,9 +115,10 @@ write_files:
       sudo make prepare_btf
     
 
-      sudo mkdir -p /usr/src/linux-headers-6.1.0-50-amd64/tools/bpf/resolve_btfids
+      BUILD_DIR=$(realpath /lib/modules/\$(uname -r)/build)
+      sudo mkdir -p "\${BUILD_DIR}/tools/bpf/resolve_btfids"
       sudo cp \$HOME/src/linux-source-6.1/tools/bpf/resolve_btfids/resolve_btfids \\
-              /usr/src/linux-headers-6.1.0-50-amd64/tools/bpf/resolve_btfids/resolve_btfids
+              "\${BUILD_DIR}/tools/bpf/resolve_btfids/resolve_btfids"
 
       echo "******** Building guest_ivshmem kernel module  and Resolving it s btf********"
       make V=1
