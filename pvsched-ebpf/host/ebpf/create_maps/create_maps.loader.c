@@ -23,8 +23,10 @@
 int main(void)
 {
 	struct create_maps_bpf *skel;
-	struct bpf_link *link, *wakeup_link;
+	struct bpf_link *link;
+	/* struct bpf_link *wakeup_link; */
 	int vms_fd, vcpus_fd, registry_fd;
+
 	int inner_fd;
 	int ret = 1;
 
@@ -101,9 +103,10 @@ int main(void)
 		goto cleanup_link;
 	}
 
+	/*
 	wakeup_link = bpf_program__attach_kprobe(
 		skel->progs.phantom_wakeup_handler,
-		false /* entry kprobe */, "try_to_wake_up");
+		false, "try_to_wake_up");
 	if (!wakeup_link) {
 		perror("attach kprobe try_to_wake_up");
 		goto cleanup_link;
@@ -113,6 +116,7 @@ int main(void)
 		perror("pin try_to_wake_up link");
 		goto cleanup_wakeup_link;
 	}
+	*/
 
 	/*
 	 * Pin maps only when they were not already pinned.
@@ -121,7 +125,7 @@ int main(void)
 		if (bpf_obj_pin(bpf_map__fd(skel->maps.vms), PIN_PATH_VMS) <
 		    0) {
 			perror("pin vms");
-			goto cleanup_wakeup_link;
+			goto cleanup_link;
 		}
 		printf("pinned vms map\n");
 	}
@@ -130,7 +134,7 @@ int main(void)
 		if (bpf_obj_pin(bpf_map__fd(skel->maps.vcpus), PIN_PATH_VCPUS) <
 		    0) {
 			perror("pin vcpus");
-			goto cleanup_wakeup_link;
+			goto cleanup_link;
 		}
 		printf("pinned vcpus map\n");
 	}
@@ -139,7 +143,7 @@ int main(void)
 		if (bpf_obj_pin(bpf_map__fd(skel->maps.map_registry),
 				PIN_PATH_REGISTRY) < 0) {
 			perror("pin map_registry");
-			goto cleanup_wakeup_link;
+			goto cleanup_link;
 		}
 		printf("pinned map_registry map\n");
 	}
@@ -147,8 +151,8 @@ int main(void)
 	printf("everything loaded successfully\n");
 	ret = 0;
 
-cleanup_wakeup_link:
-	bpf_link__destroy(wakeup_link);
+/* cleanup_wakeup_link:
+	bpf_link__destroy(wakeup_link); */
 cleanup_link:
 	bpf_link__destroy(link);
 cleanup_inner:
