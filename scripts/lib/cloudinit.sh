@@ -96,13 +96,19 @@ write_files:
       mkdir -p /tmp/phantom-tracker/logs
       exec > >(tee -a /tmp/phantom-tracker/logs/guest_ivshmem_driver_setup.log) 2>&1
       echo "******** Installing dependencies ********"
-      apt install -y git linux-headers-\$(uname -r) linux-source-6.1 dwarves libelf-dev zlib1g-dev libbpf-dev clang bpftool
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -q git linux-headers-\$(uname -r) linux-source-6.1 dwarves libelf-dev zlib1g-dev libbpf-dev clang bpftool
 
-      echo "******** Cloning phantom-tracker repo ********"
-      cd \$HOME
-      git clone https://github.com/himadrics/phantom-tracker
-      cd \$HOME/phantom-tracker
-      git checkout Nchang
+      echo "******** Cloning/Updating phantom-tracker repo ********"
+      if [ -d "\$HOME/phantom-tracker" ]; then
+        cd \$HOME/phantom-tracker
+        git fetch origin
+        git checkout Nchang
+        git pull origin Nchang
+      else
+        git clone https://github.com/himadrics/phantom-tracker \$HOME/phantom-tracker
+        cd \$HOME/phantom-tracker
+        git checkout Nchang
+      fi
       cd \$HOME
 
       echo "******** Building resolve_btfids ********"
@@ -115,14 +121,17 @@ write_files:
       sudo make prepare_btf
     
 
-      BUILD_DIR=$(realpath /lib/modules/\$(uname -r)/build)
-      sudo mkdir -p "\${BUILD_DIR}/tools/bpf/resolve_btfids"
-      sudo cp \$HOME/src/linux-source-6.1/tools/bpf/resolve_btfids/resolve_btfids \\
-              "\${BUILD_DIR}/tools/bpf/resolve_btfids/resolve_btfids"
+      RESOLVE_BTFIDS_BIN=\$HOME/src/linux-source-6.1/tools/bpf/resolve_btfids/resolve_btfids
+      KVER=\$(uname -r)
+      KCOMMON="/usr/src/linux-headers-\${KVER%-*}-common"
+      KARCH="/usr/src/linux-headers-\${KVER}"
 
-      echo "******** Building guest_ivshmem kernel module  and Resolving it s btf********"
-      make V=1
-      RESOLVE_BTFIDS=\$HOME/src/linux-source-6.1/tools/bpf/resolve_btfids/resolve_btfids
+      sudo mkdir -p "\${KCOMMON}/tools/bpf/resolve_btfids" "\${KARCH}/tools/bpf/resolve_btfids"
+      sudo cp "\${RESOLVE_BTFIDS_BIN}" "\${KCOMMON}/tools/bpf/resolve_btfids/resolve_btfids" 2>/dev/null || true
+      sudo cp "\${RESOLVE_BTFIDS_BIN}" "\${KARCH}/tools/bpf/resolve_btfids/resolve_btfids" 2>/dev/null || true
+
+      echo "******** Building guest_ivshmem kernel module and resolving BTF ********"
+      make V=1 RESOLVE_BTFIDS="\${RESOLVE_BTFIDS_BIN}"
 
       echo "******** Installing guest_ivshmem kernel module ********"
       sudo make modules_install
