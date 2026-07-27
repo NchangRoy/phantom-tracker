@@ -313,6 +313,7 @@ int phantom_switch_handler(struct trace_event_raw_sched_switch *ctx)
 	return 0;
 }
 
+/*
 SEC("tp/sched/sched_wakeup")
 int phantom_wakeup_handler(struct trace_event_raw_sched_wakeup *ctx)
 {
@@ -414,3 +415,4 @@ int phantom_wakeup_handler(struct trace_event_raw_sched_wakeup *ctx)
 	}
 	return 0;
 }
+*/
