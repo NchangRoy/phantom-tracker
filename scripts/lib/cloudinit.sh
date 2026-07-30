@@ -81,7 +81,7 @@ users:
     plain_text_passwd: ${password}
     ssh_authorized_keys:
       - ${ssh_pubkey}
-package_update: false
+package_update: true
 package_upgrade: false
 packages:
   - qemu-guest-agent
@@ -94,11 +94,9 @@ write_files:
       set -euo pipefail
       export HOME=/root
       mkdir -p /tmp/phantom-tracker/logs
-      exec > >(tee -a /tmp/phantom-tracker/logs/guest_ivshmem_driver_setup.log) 2>&1
-      echo "******** Updating package list ********"
-      DEBIAN_FRONTEND=noninteractive apt-get update -y -q
+      exec > >(tee -a /tmp/phantom-tracker/logs/guest_ivshmem_driver_setup.log > /dev/console) 2>&1
       echo "******** Installing dependencies ********"
-      DEBIAN_FRONTEND=noninteractive apt-get install -y -q git linux-headers-\$(uname -r) linux-source-6.1 dwarves libelf-dev zlib1g-dev libbpf-dev clang bpftool
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -q git  gfortran linux-headers-\$(uname -r) linux-source-6.1 dwarves libelf-dev zlib1g-dev libbpf-dev clang bpftool
 
       echo "******** Cloning/Updating phantom-tracker repo ********"
       if [ -d "\$HOME/phantom-tracker" ]; then
