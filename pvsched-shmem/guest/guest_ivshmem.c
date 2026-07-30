@@ -14,6 +14,7 @@
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/slab.h>
+#include <linux/version.h>
 
 /*
  * pvsched.h is the common header shared by kernel modules, eBPF programs,
@@ -133,9 +134,10 @@ static int guest_ivshmem_release(struct inode *inode, struct file *file)
 
 /*
  * offset is treated as a slot index (0..NR_HOST_IVSHMEM_MSGS-1), not a byte
- * offset -- each read() call returns exactly one struct hg_message and
- * advances *offset to the next slot. Slot H2G_LATEST_SLOT always holds the
- * most recently published message; see pvsched.h for the full slot ABI.
+ * offset, and is never advanced by this function -- the caller picks the
+ * slot to read on every call (e.g. via pread() or lseek()+read()). Slot
+ * H2G_LATEST_SLOT always holds the most recently published message; see
+ * pvsched.h for the full slot ABI.
  */
 static ssize_t guest_ivshmem_read(struct file *file, char __user *buf,
 				   size_t size, loff_t *offset)
@@ -167,7 +169,6 @@ static ssize_t guest_ivshmem_read(struct file *file, char __user *buf,
 	if (copy_to_user(buf, &msg, sizeof(msg)))
 		return -EFAULT;
 
-	(*offset)++;
 	return sizeof(msg);
 }
 
@@ -200,7 +201,11 @@ static int guest_ivshmem_register_chardev(void)
 		return ret;
 	}
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 4, 0)
+	guest_ivshmem_class = class_create(THIS_MODULE, GUEST_IVSHMEM_NAME);
+#else
 	guest_ivshmem_class = class_create(GUEST_IVSHMEM_NAME);
+#endif
 	if (IS_ERR(guest_ivshmem_class)) {
 		ret = PTR_ERR(guest_ivshmem_class);
 		guest_ivshmem_class = NULL;
@@ -261,8 +266,8 @@ static int guest_ivshmem_g2h_write_msg(
 	if (!guest || !guest->g2h_page)
 		return -ENODEV;
 
-	if (!gh_msg)Himadri Chhaya-Shailesh
-		return -EINVAL;Himadri Chhaya-Shailesh
+	if (!gh_msg)
+		return -EINVAL;
 
 	if (index >= NR_GUEST_IVSHMEM_MSGS)
 		return -EINVAL;

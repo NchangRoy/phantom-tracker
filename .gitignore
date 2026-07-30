@@ -46,6 +46,8 @@ user/register_vm
 **/*.loader
 **/*.skel.h
 pvsched-ebpf/host/h2g_msg_timer_loader
+test/h2g_read_test
+test/omp_test
 
 # =========================
 # VM / images
