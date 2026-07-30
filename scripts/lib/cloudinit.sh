@@ -55,12 +55,19 @@ cloudinit_create_overlay() {
 }
 
 # Generate a cloud-init seed ISO with user-data and meta-data.
-# Usage: cloudinit_make_iso <out.iso> <hostname> <ssh-pubkey-string> <password>
+# Usage: cloudinit_make_iso <out.iso> <hostname> <ssh-pubkey-string> <password> <type>
+#   <type> is "target" or "noise" -- only "target" VMs get the guest_ivshmem
+#   kernel module and omp_thread_reg BPF program built and started, since
+#   only target VMs have the ivshmem-plain PCI device attached by
+#   create_vm.sh in the first place. Building/loading that stack on a noise
+#   VM is wasted work, and modprobe guest_ivshmem fails outright there since
+#   no matching PCI device exists for it to bind to.
 cloudinit_make_iso() {
     local iso="$1"
     local hostname="$2"
     local ssh_pubkey="$3"
     local password="$4"
+    local type="$5"
     if [[ -f "$iso" ]]; then
         echo "seed ISO already present: $iso"
         return 0
@@ -69,7 +76,8 @@ cloudinit_make_iso() {
     tmpdir="$(mktemp -d)"
     trap 'rm -rf "$tmpdir"' RETURN
 
-    cat > "$tmpdir/user-data" <<EOF
+    if [[ "$type" == "target" ]]; then
+        cat > "$tmpdir/user-data" <<EOF
 #cloud-config
 hostname: ${hostname}
 manage_etc_hosts: true
@@ -119,7 +127,7 @@ write_files:
       echo "******** Preparing BTF for guest_ivshmem ********"
       cd \$HOME/phantom-tracker/pvsched-shmem/guest
       sudo make prepare_btf
-    
+
 
       RESOLVE_BTFIDS_BIN=\$HOME/src/linux-source-6.1/tools/bpf/resolve_btfids/resolve_btfids
       KVER=\$(uname -r)
@@ -151,6 +159,29 @@ runcmd:
   - systemctl enable --now qemu-guest-agent
   - /root/guest_ivshmem_driver_setup.sh
 EOF
+    else
+        cat > "$tmpdir/user-data" <<EOF
+#cloud-config
+hostname: ${hostname}
+manage_etc_hosts: true
+users:
+  - name: debian
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+    plain_text_passwd: ${password}
+    ssh_authorized_keys:
+      - ${ssh_pubkey}
+package_update: true
+package_upgrade: false
+packages:
+  - qemu-guest-agent
+  - openssh-server
+runcmd:
+  - systemctl enable --now ssh
+  - systemctl enable --now qemu-guest-agent
+EOF
+    fi
 
     cat > "$tmpdir/meta-data" <<EOF
 instance-id: ${hostname}
