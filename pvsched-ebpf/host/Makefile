@@ -41,6 +41,8 @@ bin:
 # ============================================================
 
 BPF_INCLUDE = -Iinclude -I../../include -I/usr/include
+PROJECT_INCLUDE := ../../include
+PVSCHED_HDR := $(PROJECT_INCLUDE)/pvsched.h
 # Build eBPF loader (userspace program that loads BPF into kernel)
 BPF_CFLAGS := $(shell pkg-config --cflags libbpf)
 BPF_LDLIBS := $(shell pkg-config --libs libbpf)
@@ -65,7 +67,7 @@ include/create_maps.skel.h: bin/create_maps.bpf.o
 bin/create_maps.loader: include/create_maps.skel.h ebpf/create_maps/create_maps.loader.c
 	gcc ebpf/create_maps/create_maps.loader.c -o $@ $(BPF_CFLAGS) $(BPF_LDLIBS) $(BPF_INCLUDE)
 
-bin/timer.bpf.o: ebpf/timer/timer.bpf.c | bin include/vmlinux.h
+bin/timer.bpf.o: ebpf/timer/timer.bpf.c $(PVSCHED_HDR) | bin include/vmlinux.h
 	$(BPF_CC) $(BPF_PROG_CFLAGS) $(BPF_INCLUDE) -c $< -o $@
 
 include/timer.skel.h: bin/timer.bpf.o

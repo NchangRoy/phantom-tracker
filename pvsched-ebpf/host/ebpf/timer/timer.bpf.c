@@ -3,11 +3,21 @@
 #include "phantom_tracker.h"
 #include "register_vm_bpf.h"
 #include <bpf/bpf_helpers.h>
+#include "pvsched.h"
+
 char LICENSE[] SEC("license") = "GPL";
 
 #define CLOCK_BOOTTIME 7
+
+#define MSG_INDEX 0
 #define MSG_TIMER_PERIOD_NS 4000000ULL /* 4 ms */
 // timer map and struct
+
+
+/* Kfunc exported by host_ivshmem.ko */
+extern int bpf_host_ivshmem_h2g_write(__u32 index,
+              const struct hg_message *hg_msg) __ksym;
+
 struct elem {
 	struct bpf_timer timer;
 	__u64 counter;
@@ -167,6 +177,7 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 	void *collection_map_ptr, *processing_map_ptr;
 	int nb_samples;
 	void *map_to_use;
+	struct hg_message msg = {};
 
 	vm_name = (const char *)key;
 	vm = (struct vm_t *)value;
@@ -247,6 +258,8 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 	__s64 avg = phantom_average(map_to_use, nb_samples);
 
 	bpf_printk("Phantom average is %lld\n", avg);
+	msg.msg=avg;
+	bpf_host_ivshmem_h2g_write(MSG_INDEX, &msg);
 	return 0;
 }
 
