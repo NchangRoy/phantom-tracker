@@ -95,6 +95,10 @@ packages:
   - qemu-guest-agent
   - openssh-server
 write_files:
+  - path: /etc/udev/rules.d/99-guest-ivshmem.rules
+    permissions: '0644'
+    content: |
+      KERNEL=="guest_ivshmem", MODE="0644"
   - path: /root/guest_ivshmem_driver_setup.sh
     permissions: '0755'
     content: |
@@ -144,6 +148,7 @@ write_files:
       echo "******** Installing guest_ivshmem kernel module ********"
       sudo make modules_install
       sudo depmod -a "\$(uname -r)"
+      sudo udevadm control --reload-rules
       sudo modprobe guest_ivshmem
 
       echo "******** Building omp_thread_reg BPF program ********"
