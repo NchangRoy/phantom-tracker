@@ -168,8 +168,7 @@ PVSCHED_KFUNC int bpf_host_ivshmem_h2g_write(u32 index,
 	return host_ivshmem_h2g_write_msg(&backend, index, hg_msg);
 }
 
-PVSCHED_KFUNC int bpf_host_ivshmem_g2h_read(u32 index,
-					      struct gh_message *msg)
+PVSCHED_KFUNC int bpf_host_ivshmem_g2h_read(u32 index, struct gh_message *msg)
 {
 	return host_ivshmem_g2h_read(&backend, index, msg);
 }

@@ -171,8 +171,7 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 	vm_name = (const char *)key;
 	vm = (struct vm_t *)value;
 
-#pragma GCC \
-	unroll 64 /* bpf-gcc equivalent of clang loop unroll(full); VM_NAME_LEN=64 */
+#pragma GCC  unroll 64 /* bpf-gcc equivalent of clang loop unroll(full); VM_NAME_LEN=64 */
 	for (i = 0; i < VM_NAME_LEN - 3; i++) {
 		char c = vm_name[i];
 		collection_buff_1[i] = c;
@@ -186,7 +185,7 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 	collection_buff_1[i + 2] = '\0';
 
 	collection_buff_2[i] = '_';
-	collection_buff_2[i + 1] = '2';
+	collection_buff_2[i + 1]  '2';
 	collection_buff_2[i + 2] = '\0';
 
 	collection_map_ptr =
