@@ -9,7 +9,7 @@ char LICENSE[] SEC("license") = "GPL";
 
 #define CLOCK_BOOTTIME 7
 
-#define MSG_INDEX 0
+#define MSG_INDEX H2G_FIRST_HISTORY_SLOT
 #define MSG_TIMER_PERIOD_NS 4000000ULL /* 4 ms */
 // timer map and struct
 
