@@ -130,7 +130,7 @@ write_files:
 
       echo "******** Preparing BTF for guest_ivshmem ********"
       cd \$HOME/phantom-tracker/pvsched-shmem/guest
-      sudo make prepare_btf
+      make prepare_btf
 
 
       RESOLVE_BTFIDS_BIN=\$HOME/src/linux-source-6.1/tools/bpf/resolve_btfids/resolve_btfids
@@ -138,31 +138,50 @@ write_files:
       KCOMMON="/usr/src/linux-headers-\${KVER%-*}-common"
       KARCH="/usr/src/linux-headers-\${KVER}"
 
-      sudo mkdir -p "\${KCOMMON}/tools/bpf/resolve_btfids" "\${KARCH}/tools/bpf/resolve_btfids"
-      sudo cp "\${RESOLVE_BTFIDS_BIN}" "\${KCOMMON}/tools/bpf/resolve_btfids/resolve_btfids" 2>/dev/null || true
-      sudo cp "\${RESOLVE_BTFIDS_BIN}" "\${KARCH}/tools/bpf/resolve_btfids/resolve_btfids" 2>/dev/null || true
+      mkdir -p "\${KCOMMON}/tools/bpf/resolve_btfids" "\${KARCH}/tools/bpf/resolve_btfids"
+      cp "\${RESOLVE_BTFIDS_BIN}" "\${KCOMMON}/tools/bpf/resolve_btfids/resolve_btfids" 2>/dev/null || true
+      cp "\${RESOLVE_BTFIDS_BIN}" "\${KARCH}/tools/bpf/resolve_btfids/resolve_btfids" 2>/dev/null || true
 
       echo "******** Building guest_ivshmem kernel module and resolving BTF ********"
       make V=1 RESOLVE_BTFIDS="\${RESOLVE_BTFIDS_BIN}"
 
       echo "******** Installing guest_ivshmem kernel module ********"
-      sudo make modules_install
-      sudo depmod -a "\$(uname -r)"
-      sudo udevadm control --reload-rules
-      sudo modprobe guest_ivshmem
+      make modules_install
+      depmod -a "\$(uname -r)"
+      udevadm control --reload-rules
+      modprobe guest_ivshmem
 
       echo "******** Building omp_thread_reg BPF program ********"
       cd \$HOME/phantom-tracker/pvsched-ebpf/guest
       make
 
       echo "******** Starting omp_thread_reg BPF program ********"
-      sudo ./omp_thread_reg.loader
+      ./omp_thread_reg.loader
 
       echo "******** guest_ivshmem_driver_setup.sh complete ********"
+  - path: /etc/systemd/system/phantom-tracker.service
+
+    content: |
+        [Unit]
+        Description = Pulls latest phantom tracker repository, builds and installs guest_ivshmem driver.
+        After=network-online.target
+        Wants=network-online.target
+
+        [Service]
+        Type=oneshot
+        RemainAfterExit=yes
+        ExecStart=/bin/bash /root/guest_ivshmem_driver_setup.sh
+        
+        [Install]
+        WantedBy=multi-user.target
+
+
+
 runcmd:
   - systemctl enable --now ssh
   - systemctl enable --now qemu-guest-agent
-  - /root/guest_ivshmem_driver_setup.sh
+  - systemctl daemon-reload
+  - systemctl enable --now phantom-tracker
 EOF
     else
         cat > "$tmpdir/user-data" <<EOF
