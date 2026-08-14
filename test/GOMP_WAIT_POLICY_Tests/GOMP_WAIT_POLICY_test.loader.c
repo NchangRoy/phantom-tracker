@@ -127,16 +127,16 @@ int main(void)
 			printf("  [%d] offset = 0x%lx\n", i, dw_offsets[i]);
 	}
 
-	/* 3 — load BPF skeleton */
-	skel = GOMP_WAIT_POLICY_test_bpf__open_and_load();
+	/* 3 — open BPF skeleton */
+	skel = GOMP_WAIT_POLICY_test_bpf__open();
 	if (!skel) {
-		fprintf(stderr, "failed to open and load BPF skeleton\n");
+		fprintf(stderr, "failed to open BPF skeleton\n");
 		return 1;
 	}
 
 	/*
-	 * 4 — reuse the omp_threads_map pinned by omp_thread_reg so that
-	 *     only already-registered OMP threads are tracked here too.
+	 * 4 — reuse the omp_threads_map pinned by omp_thread_reg BEFORE load()
+	 *     so BPF programs query the active pinned map.
 	 */
 	int pinned_map_fd = bpf_obj_get(PIN_OMP_THREADS_MAP);
 	if (pinned_map_fd < 0) {
@@ -155,6 +155,12 @@ int main(void)
 	}
 	close(pinned_map_fd);
 	printf("Reusing pinned omp_threads_map from omp_thread_reg loader\n");
+
+	err = GOMP_WAIT_POLICY_test_bpf__load(skel);
+	if (err) {
+		fprintf(stderr, "failed to load BPF skeleton\n");
+		goto cleanup;
+	}
 
 	/* 5a — attach sched_switch tracepoint */
 	switch_link = bpf_program__attach(skel->progs.gomp_switch_handler);
