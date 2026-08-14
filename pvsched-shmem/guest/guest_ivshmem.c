@@ -186,7 +186,7 @@ static struct file_operations guest_ivshmem_fops ={
 
 
 /*
- * Must be called after guest_ivshmem is populated by probe() -- cdev_init()/
+ * Must be called after guest_ivshmem is populated by probe() -- cdev_init()
  * cdev_add() below bind to &guest_ivshmem->cdev, which doesn't exist yet
  * before that.
  */

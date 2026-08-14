@@ -33,11 +33,11 @@
 #include <string.h>
 #include <stdint.h>
 
-#define _DW_LOOKAHEAD_SPIN    60   /* endbr64 → pause                  */
-#define _DW_LOOKAHEAD_FUTEX   80   /* search window past pause for 0xca */
-#define _DW_LOOKAHEAD_SYSCALL 150  /* 0xca load → syscall (hoisted)    */
-#define _DW_MAX_LINES         600000
-#define _DW_LINE_CAP          512
+#define _DW_LOOKAHEAD_SPIN 60 /* endbr64 → pause                  */
+#define _DW_LOOKAHEAD_FUTEX 80 /* search window past pause for 0xca */
+#define _DW_LOOKAHEAD_SYSCALL 150 /* 0xca load → syscall (hoisted)    */
+#define _DW_MAX_LINES 600000
+#define _DW_LINE_CAP 512
 
 /*
  * _dw_parse_addr — extract the hex address at the start of an objdump line.
@@ -46,13 +46,16 @@
  */
 static uint64_t _dw_parse_addr(const char *line)
 {
-    const char *p = line;
-    while (*p == ' ' || *p == '\t') p++;
-    if ((*p < '0' || *p > '9') && (*p < 'a' || *p > 'f')) return 0;
-    char *end;
-    uint64_t addr = (uint64_t)strtoull(p, &end, 16);
-    if (*end != ':') return 0;
-    return addr;
+	const char *p = line;
+	while (*p == ' ' || *p == '\t')
+		p++;
+	if ((*p < '0' || *p > '9') && (*p < 'a' || *p > 'f'))
+		return 0;
+	char *end;
+	uint64_t addr = (uint64_t)strtoull(p, &end, 16);
+	if (*end != ':')
+		return 0;
+	return addr;
 }
 
 /*
@@ -65,61 +68,68 @@ static uint64_t _dw_parse_addr(const char *line)
  *
  * Returns the number of offsets written to out[], or -1 on error.
  */
-static int find_do_wait_offsets(const char *libgomp,
-                                uint64_t   *out,
-                                int         out_max)
+static int find_do_wait_offsets(const char *libgomp, uint64_t *out, int out_max)
 {
-    char cmd[700];
-    snprintf(cmd, sizeof(cmd), "objdump -d -M intel %s 2>/dev/null", libgomp);
+	char cmd[700];
+	snprintf(cmd, sizeof(cmd), "objdump -d -M intel %s 2>/dev/null",
+		 libgomp);
 
-    FILE *fp = popen(cmd, "r");
-    if (!fp) { perror("popen objdump"); return -1; }
+	FILE *fp = popen(cmd, "r");
+	if (!fp) {
+		perror("popen objdump");
+		return -1;
+	}
 
-    /* Read all disassembly lines into memory */
-    int    capacity = _DW_MAX_LINES, nlines = 0;
-    char **lines    = malloc(capacity * sizeof(char *));
-    if (!lines) { pclose(fp); return -1; }
+	/* Read all disassembly lines into memory */
+	int capacity = _DW_MAX_LINES, nlines = 0;
+	char **lines = malloc(capacity * sizeof(char *));
+	if (!lines) {
+		pclose(fp);
+		return -1;
+	}
 
-    char buf[_DW_LINE_CAP];
-    while (fgets(buf, sizeof(buf), fp)) {
-        if (nlines >= capacity) {
-            fprintf(stderr,
-                    "find_do_wait: objdump output truncated at %d lines\n",
-                    capacity);
-            break;
-        }
-        lines[nlines++] = strdup(buf);
-    }
-    pclose(fp);
+	char buf[_DW_LINE_CAP];
+	while (fgets(buf, sizeof(buf), fp)) {
+		if (nlines >= capacity) {
+			fprintf(stderr,
+				"find_do_wait: objdump output truncated at %d lines\n",
+				capacity);
+			break;
+		}
+		lines[nlines++] = strdup(buf);
+	}
+	pclose(fp);
 
-    int found = 0;
+	int found = 0;
 
-    for (int i = 0; i < nlines && found < out_max; i++) {
+	for (int i = 0; i < nlines && found < out_max; i++) {
+		/* Step 1: endbr64 — candidate function entry */
+		if (!strstr(lines[i], "endbr64"))
+			continue;
 
-        /* Step 1: endbr64 — candidate function entry */
-        if (!strstr(lines[i], "endbr64"))
-            continue;
+		uint64_t fn_addr = _dw_parse_addr(lines[i]);
+		if (!fn_addr)
+			continue;
 
-        uint64_t fn_addr = _dw_parse_addr(lines[i]);
-        if (!fn_addr)
-            continue;
+		/* Step 2: pause within LOOKAHEAD_SPIN lines (cpu_relax inside do_spin) */
+		int pause_idx = -1;
+		int spin_end = i + _DW_LOOKAHEAD_SPIN;
+		if (spin_end > nlines)
+			spin_end = nlines;
 
-        /* Step 2: pause within LOOKAHEAD_SPIN lines (cpu_relax inside do_spin) */
-        int pause_idx = -1;
-        int spin_end  = i + _DW_LOOKAHEAD_SPIN;
-        if (spin_end > nlines) spin_end = nlines;
+		for (int j = i + 1; j < spin_end; j++) {
+			if (strstr(lines[j], "endbr64"))
+				break; /* new function */
+			if (strstr(lines[j], "\tpause") ||
+			    strstr(lines[j], " pause")) {
+				pause_idx = j;
+				break;
+			}
+		}
+		if (pause_idx < 0)
+			continue;
 
-        for (int j = i + 1; j < spin_end; j++) {
-            if (strstr(lines[j], "endbr64")) break; /* new function */
-            if (strstr(lines[j], "\tpause") || strstr(lines[j], " pause")) {
-                pause_idx = j;
-                break;
-            }
-        }
-        if (pause_idx < 0)
-            continue;
-
-        /*
+		/*
          * Step 3: look for NR_futex (0xca) loaded into eax or any rNd
          * (r8d-r15d) register BEFORE the pause instruction.
          *
@@ -133,60 +143,67 @@ static int find_do_wait_offsets(const char *libgomp,
          * Accepted destinations:  eax,  r8d-r15d  (mov    r<digit>...)
          * Rejected destinations:  ebp, ebx, etc.  (no leading 'r' + digit)
          */
-        int futex_nr_idx = -1;
+		int futex_nr_idx = -1;
 
-        /* Scan only from endbr64 to the pause line (hoisted-load window) */
-        for (int j = i + 1; j < pause_idx; j++) {
-            if (!strstr(lines[j], "0xca")) continue;
+		/* Scan only from endbr64 to the pause line (hoisted-load window) */
+		for (int j = i + 1; j < pause_idx; j++) {
+			if (!strstr(lines[j], "0xca"))
+				continue;
 
-            /* Accept mov eax,0xca directly */
-            if (strstr(lines[j], "mov    eax,0xca")) {
-                futex_nr_idx = j;
-                break;
-            }
+			/* Accept mov eax,0xca directly */
+			if (strstr(lines[j], "mov    eax,0xca")) {
+				futex_nr_idx = j;
+				break;
+			}
 
-            /*
+			/*
              * Accept mov rNd,0xca for any N that is a digit (r8d-r15d).
              * Find "mov    r" and verify the character after 'r' is a digit.
              * This rejects "mov    ebp,0xca" ("ebp" starts with 'e').
              */
-            char *p = lines[j];
-            while ((p = strstr(p, "mov    r")) != NULL) {
-                char after_r = p[8]; /* char right after 'r' in "mov    r" */
-                if (after_r >= '0' && after_r <= '9') {
-                    if (strstr(p, ",0xca")) {
-                        futex_nr_idx = j;
-                        break;
-                    }
-                }
-                p++;
-            }
-            if (futex_nr_idx >= 0) break;
-        }
-        if (futex_nr_idx < 0)
-            continue;
+			char *p = lines[j];
+			while ((p = strstr(p, "mov    r")) != NULL) {
+				char after_r =
+					p[8]; /* char right after 'r' in "mov    r" */
+				if (after_r >= '0' && after_r <= '9') {
+					if (strstr(p, ",0xca")) {
+						futex_nr_idx = j;
+						break;
+					}
+				}
+				p++;
+			}
+			if (futex_nr_idx >= 0)
+				break;
+		}
+		if (futex_nr_idx < 0)
+			continue;
 
-        /* Step 4: syscall within LOOKAHEAD_SYSCALL lines after the 0xca load */
-        int sc_end = futex_nr_idx + _DW_LOOKAHEAD_SYSCALL;
-        if (sc_end > nlines) sc_end = nlines;
+		/* Step 4: syscall within LOOKAHEAD_SYSCALL lines after the 0xca load */
+		int sc_end = futex_nr_idx + _DW_LOOKAHEAD_SYSCALL;
+		if (sc_end > nlines)
+			sc_end = nlines;
 
-        int matched = 0;
-        for (int j = futex_nr_idx + 1; j < sc_end; j++) {
-            if (strstr(lines[j], "endbr64")) break;
-            if (strstr(lines[j], "\tsyscall") || strstr(lines[j], " syscall")) {
-                matched = 1;
-                break;
-            }
-        }
-        if (!matched)
-            continue;
+		int matched = 0;
+		for (int j = futex_nr_idx + 1; j < sc_end; j++) {
+			if (strstr(lines[j], "endbr64"))
+				break;
+			if (strstr(lines[j], "\tsyscall") ||
+			    strstr(lines[j], " syscall")) {
+				matched = 1;
+				break;
+			}
+		}
+		if (!matched)
+			continue;
 
-        out[found++] = fn_addr;
-    }
+		out[found++] = fn_addr;
+	}
 
-    for (int i = 0; i < nlines; i++) free(lines[i]);
-    free(lines);
-    return found;
+	for (int i = 0; i < nlines; i++)
+		free(lines[i]);
+	free(lines);
+	return found;
 }
 
 #undef _DW_LOOKAHEAD_SPIN
