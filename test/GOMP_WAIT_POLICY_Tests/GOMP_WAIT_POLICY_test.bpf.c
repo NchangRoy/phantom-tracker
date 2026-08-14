@@ -76,7 +76,8 @@ int gomp_switch_handler(struct trace_event_raw_sched_switch *ctx)
  * average and log both the average and the thread id.
  * ----------------------------------------------------------------------- */
 SEC("tp/syscalls/sys_enter_futex")
-int gomp_futex_enter(struct trace_event_raw_sys_enter *ctx)
+int gomp_futex_enter(str
+uct trace_event_raw_sys_enter *ctx)
 {
     __u32 core = bpf_get_smp_processor_id();
     __u32 omp_tid = (__u32)bpf_get_current_pid_tgid();

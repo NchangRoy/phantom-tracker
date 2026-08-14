@@ -40,7 +40,7 @@
 #include "find_do_wait.h"
 
 /* Reuse the omp_threads_map already pinned by omp_thread_reg */
-#define PIN_OMP_THREADS_MAP     "/sys/fs/bpf/omp_threads_map"
+#define PIN_OMP_THREADS_MAP "/sys/fs/bpf/omp_threads_map"
 
 /* Maximum number of do_wait uprobe links we will manage */
 #define MAX_DO_WAIT 64
@@ -184,7 +184,8 @@ int main(void)
 	err = libbpf_get_error(kprobe_entry_link);
 	if (err) {
 		kprobe_entry_link = NULL;
-		fprintf(stderr, "failed to attach kprobe/guest_ivshmem_read: %s\n",
+		fprintf(stderr,
+			"failed to attach kprobe/guest_ivshmem_read: %s\n",
 			strerror(-err));
 		goto cleanup;
 	}
@@ -195,7 +196,8 @@ int main(void)
 	err = libbpf_get_error(kretprobe_ret_link);
 	if (err) {
 		kretprobe_ret_link = NULL;
-		fprintf(stderr, "failed to attach kretprobe/guest_ivshmem_read: %s\n",
+		fprintf(stderr,
+			"failed to attach kretprobe/guest_ivshmem_read: %s\n",
 			strerror(-err));
 		goto cleanup;
 	}
@@ -217,8 +219,8 @@ int main(void)
 			goto cleanup;
 		}
 
-		printf("Attached → %s+0x%lx  [do_wait body %d]\n",
-		       libgomp_path, dw_offsets[i], i);
+		printf("Attached → %s+0x%lx  [do_wait body %d]\n", libgomp_path,
+		       dw_offsets[i], i);
 	}
 
 	if (n_do_wait == 0)

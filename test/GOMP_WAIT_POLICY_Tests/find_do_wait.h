@@ -6,26 +6,20 @@
  * do_wait bodies inside a libgomp shared library by disassembling it and
  * matching the signature:
  *
- *   endbr64                         ← CET function entry
- *   ... (≤ LOOKAHEAD_SPIN lines)
  *   pause                           ← cpu_relax() inside do_spin
- *   ... (anywhere in same function body, including before pause)
+ *   ... (≤ LOOKAHEAD_FUTEX lines, without crossing function boundary ret)
  *   mov eax,0xca  OR               ← __NR_futex = 202 loaded into eax, OR
- *   mov r13d,0xca                  ← loaded via staging register (hoisted)
- *   ... (≤ LOOKAHEAD_SYSCALL lines after the 0xca load)
+ *   mov rNd,0xca                   ← loaded via staging register
+ *   ... (≤ LOOKAHEAD_SYSCALL lines)
  *   syscall                         ← actual futex syscall
  *
- * Because do_wait is inlined and stripped it carries no symbol name.
- * libgomp typically contains multiple copies (one per barrier variant),
- * all of which are returned so the caller can attach a uprobe to each.
+ * Resolves the function entry address by scanning backward from pause past the
+ * preceding ret and padding nops.
  *
  * Usage:
  *   uint64_t offsets[32];
  *   int n = find_do_wait_offsets(libgomp_path, offsets, 32);
  *   for (int i = 0; i < n; i++) { ... attach uprobe at offsets[i] ... }
- *
- * Include this header in any translation unit that needs the function.
- * The 'static' qualifier gives each TU its own copy (no ODR issues).
  */
 
 #include <stdio.h>
@@ -33,9 +27,8 @@
 #include <string.h>
 #include <stdint.h>
 
-#define _DW_LOOKAHEAD_SPIN 60 /* endbr64 → pause                  */
-#define _DW_LOOKAHEAD_FUTEX 80 /* search window past pause for 0xca */
-#define _DW_LOOKAHEAD_SYSCALL 150 /* 0xca load → syscall (hoisted)    */
+#define _DW_LOOKAHEAD_FUTEX 100   /* pause → 0xca load */
+#define _DW_LOOKAHEAD_SYSCALL 150 /* 0xca load → syscall */
 #define _DW_MAX_LINES 600000
 #define _DW_LINE_CAP 512
 
@@ -59,6 +52,28 @@ static uint64_t _dw_parse_addr(const char *line)
 }
 
 /*
+ * _dw_find_fn_entry — scan backward from pause to find the start of the function body.
+ */
+static uint64_t _dw_find_fn_entry(char **lines, int pause_idx)
+{
+	int entry_idx = 0;
+	for (int k = pause_idx - 1; k >= 0; k--) {
+		if (strstr(lines[k], "\tret") || strstr(lines[k], " ret") ||
+		    strstr(lines[k], "\tretq") || strstr(lines[k], " retq")) {
+			entry_idx = k + 1;
+			break;
+		}
+	}
+	/* Skip alignment nops if any */
+	while (entry_idx < pause_idx &&
+	       (strstr(lines[entry_idx], "nop") || strstr(lines[entry_idx], "cs nop"))) {
+		entry_idx++;
+	}
+
+	return _dw_parse_addr(lines[entry_idx]);
+}
+
+/*
  * find_do_wait_offsets — scan libgomp for all do_wait body offsets.
  *
  * Parameters:
@@ -71,8 +86,7 @@ static uint64_t _dw_parse_addr(const char *line)
 static int find_do_wait_offsets(const char *libgomp, uint64_t *out, int out_max)
 {
 	char cmd[700];
-	snprintf(cmd, sizeof(cmd), "objdump -d -M intel %s 2>/dev/null",
-		 libgomp);
+	snprintf(cmd, sizeof(cmd), "objdump -d -M intel %s 2>/dev/null", libgomp);
 
 	FILE *fp = popen(cmd, "r");
 	if (!fp) {
@@ -103,101 +117,84 @@ static int find_do_wait_offsets(const char *libgomp, uint64_t *out, int out_max)
 	int found = 0;
 
 	for (int i = 0; i < nlines && found < out_max; i++) {
-		/* Step 1: endbr64 — candidate function entry */
-		if (!strstr(lines[i], "endbr64"))
+		/* Step 1: look for pause instruction (cpu_relax inside do_spin) */
+		if (!strstr(lines[i], "\tpause") && !strstr(lines[i], " pause"))
 			continue;
 
-		uint64_t fn_addr = _dw_parse_addr(lines[i]);
-		if (!fn_addr)
-			continue;
+		/* Step 2: look forward for NR_futex (0xca) load */
+		int futex_idx = -1;
+		int end_futex = i + _DW_LOOKAHEAD_FUTEX;
+		if (end_futex > nlines)
+			end_futex = nlines;
 
-		/* Step 2: pause within LOOKAHEAD_SPIN lines (cpu_relax inside do_spin) */
-		int pause_idx = -1;
-		int spin_end = i + _DW_LOOKAHEAD_SPIN;
-		if (spin_end > nlines)
-			spin_end = nlines;
-
-		for (int j = i + 1; j < spin_end; j++) {
-			if (strstr(lines[j], "endbr64"))
-				break; /* new function */
-			if (strstr(lines[j], "\tpause") ||
-			    strstr(lines[j], " pause")) {
-				pause_idx = j;
+		for (int j = i + 1; j < end_futex; j++) {
+			/* Stop if we cross a function boundary (ret) */
+			if (strstr(lines[j], "\tret") || strstr(lines[j], " ret") ||
+			    strstr(lines[j], "\tretq") || strstr(lines[j], " retq"))
 				break;
-			}
-		}
-		if (pause_idx < 0)
-			continue;
 
-		/*
-         * Step 3: look for NR_futex (0xca) loaded into eax or any rNd
-         * (r8d-r15d) register BEFORE the pause instruction.
-         *
-         * In do_wait the compiler always hoists the NR_futex load before the
-         * spin loop (before pause). False positives like omp_test_nest_lock
-         * and gomp_mutex_lock_slow also have a pause + futex pattern, but
-         * their 0xca loads appear AFTER pause in the retry body.
-         *
-         * Search window: from endbr64 up to (but not past) the pause line.
-         *
-         * Accepted destinations:  eax,  r8d-r15d  (mov    r<digit>...)
-         * Rejected destinations:  ebp, ebx, etc.  (no leading 'r' + digit)
-         */
-		int futex_nr_idx = -1;
-
-		/* Scan only from endbr64 to the pause line (hoisted-load window) */
-		for (int j = i + 1; j < pause_idx; j++) {
 			if (!strstr(lines[j], "0xca"))
 				continue;
 
-			/* Accept mov eax,0xca directly */
 			if (strstr(lines[j], "mov    eax,0xca")) {
-				futex_nr_idx = j;
+				futex_idx = j;
 				break;
 			}
 
-			/*
-             * Accept mov rNd,0xca for any N that is a digit (r8d-r15d).
-             * Find "mov    r" and verify the character after 'r' is a digit.
-             * This rejects "mov    ebp,0xca" ("ebp" starts with 'e').
-             */
 			char *p = lines[j];
 			while ((p = strstr(p, "mov    r")) != NULL) {
-				char after_r =
-					p[8]; /* char right after 'r' in "mov    r" */
+				char after_r = p[8];
 				if (after_r >= '0' && after_r <= '9') {
 					if (strstr(p, ",0xca")) {
-						futex_nr_idx = j;
+						futex_idx = j;
 						break;
 					}
 				}
 				p++;
 			}
-			if (futex_nr_idx >= 0)
+			if (futex_idx >= 0)
 				break;
 		}
-		if (futex_nr_idx < 0)
+
+		if (futex_idx < 0)
 			continue;
 
-		/* Step 4: syscall within LOOKAHEAD_SYSCALL lines after the 0xca load */
-		int sc_end = futex_nr_idx + _DW_LOOKAHEAD_SYSCALL;
+		/* Step 3: look forward for syscall instruction */
+		int sc_end = futex_idx + _DW_LOOKAHEAD_SYSCALL;
 		if (sc_end > nlines)
 			sc_end = nlines;
 
 		int matched = 0;
-		for (int j = futex_nr_idx + 1; j < sc_end; j++) {
-			if (strstr(lines[j], "endbr64"))
+		for (int j = futex_idx + 1; j < sc_end; j++) {
+			if (strstr(lines[j], "\tret") || strstr(lines[j], " ret") ||
+			    strstr(lines[j], "\tretq") || strstr(lines[j], " retq"))
 				break;
-			if (strstr(lines[j], "\tsyscall") ||
-			    strstr(lines[j], " syscall")) {
+			if (strstr(lines[j], "\tsyscall") || strstr(lines[j], " syscall")) {
 				matched = 1;
 				break;
 			}
 		}
+
 		if (!matched)
 			continue;
 
-		out[found++] = fn_addr;
+		/* Step 4: resolve function entry offset */
+		uint64_t fn_addr = _dw_find_fn_entry(lines, i);
+		if (!fn_addr)
+			fn_addr = _dw_parse_addr(lines[i]); /* fallback to pause instruction address */
+
+		/* Deduplicate function offsets */
+		int duplicate = 0;
+		for (int k = 0; k < found; k++) {
+			if (out[k] == fn_addr) {
+				duplicate = 1;
+				break;
+			}
+		}
+
+		if (!duplicate && fn_addr != 0) {
+			out[found++] = fn_addr;
+		}
 	}
 
 	for (int i = 0; i < nlines; i++)
@@ -206,7 +203,6 @@ static int find_do_wait_offsets(const char *libgomp, uint64_t *out, int out_max)
 	return found;
 }
 
-#undef _DW_LOOKAHEAD_SPIN
 #undef _DW_LOOKAHEAD_FUTEX
 #undef _DW_LOOKAHEAD_SYSCALL
 #undef _DW_MAX_LINES
