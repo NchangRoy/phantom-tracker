@@ -15,6 +15,7 @@
 #include <linux/pci.h>
 #include <linux/slab.h>
 #include <linux/version.h>
+#include <linux/mm_types.h>
 
 /*
  * pvsched.h is the common header shared by kernel modules, eBPF programs,
@@ -95,9 +96,9 @@
 struct guest_ivshmem_device {
 	struct pci_dev *pdev;
 	u8 __iomem *g2h_page;
-	u8 __iomem *h2g_page;
 	struct cdev cdev;
 	resource_size_t size;
+	resource_size_t h2g_phy_page;
 };
 
 /*
@@ -133,44 +134,27 @@ static int guest_ivshmem_release(struct inode *inode, struct file *file)
 }
 
 /*
- * offset is treated as a slot index (0..NR_HOST_IVSHMEM_MSGS-1), not a byte
- * offset, and is never advanced by this function -- the caller picks the
- * slot to read on every call (e.g. via pread() or lseek()+read()). Slot
- * H2G_LATEST_SLOT always holds the most recently published message; see
- * pvsched.h for the full slot ABI.
+ * params:
+	file: struct file: 
+	vm_area: struct vm_area_struct
+	objective: a file operation to permit userspace programs to direclty map host_to_guest page in userspace memory and read phantom average
+			  lower overhead
  */
-static ssize_t guest_ivshmem_read(struct file *file, char __user *buf,
-				   size_t size, loff_t *offset)
+int  guest_ivshmem_mmap(struct file * file, struct vm_area_struct * vma)
 {
 	struct guest_ivshmem_device *guest = file->private_data;
-	struct hg_message __iomem *slot;
-	struct hg_message msg = {};
-
-	if (!guest || !guest->h2g_page)
-		return -ENODEV;
-
-	if (size < sizeof(msg))
-		return -EINVAL;
-
-	if (*offset < 0 || *offset >= NR_HOST_IVSHMEM_MSGS)
-		return 0;
-
-	slot = (struct hg_message __iomem *)
-		(guest->h2g_page + (*offset) * HOST_IVSHMEM_MSG_SIZE);
-
-	/*
-	 * slot is __iomem: it must be read through an I/O accessor rather
-	 * than a plain pointer dereference or memcpy() (see the @g2h_page
-	 * doc comment above for why), so copy it into a kernel-stack buffer
-	 * first and only then hand it to copy_to_user().
-	 */
-	memcpy_fromio(&msg, slot, sizeof(msg));
-
-	if (copy_to_user(buf, &msg, sizeof(msg)))
-		return -EFAULT;
-
-	return sizeof(msg);
+	int status;
+	status  = remap_pfn_range(vma,
+							  vma->vm_start, 
+							  guest->h2g_phy_page >> PAGE_SHIFT,
+							  GUEST_IVSHMEM_H2G_SIZE,
+							  vma->vm_page_prot);
+	return status;
 }
+
+
+
+
 
 /*
 	file operations for the char device
@@ -181,7 +165,7 @@ static struct file_operations guest_ivshmem_fops ={
 	.owner = THIS_MODULE,
 	.open = guest_ivshmem_open,
 	.release = guest_ivshmem_release,
-	.read = guest_ivshmem_read,
+	.mmap = guest_ivshmem_mmap
 };
 
 
@@ -420,18 +404,10 @@ static int guest_ivshmem_probe(struct pci_dev *pdev,
 	guest->size = size;
 
 	/*
-	 * Map page 0 of BAR2 (host-to-guest messages) so guest userspace can
-	 * read it through the character device.
+	 * Get physical address of h2g page
 	 */
-	guest->h2g_page = pci_iomap_range(pdev, GUEST_IVSHMEM_BAR, GUEST_IVSHMEM_H2G_OFFSET,
-		GUEST_IVSHMEM_H2G_SIZE);
-
-	if (!guest->h2g_page) {
-		dev_err(&pdev->dev, GUEST_IVSHMEM_NAME ": failed to map the H2G page in BAR%d\n",
-			GUEST_IVSHMEM_BAR);
-		ret = -ENOMEM;
-		goto err_unmap_g2h;
-	}
+	
+	guest->h2g_phy_page = pci_resource_start(pdev, GUEST_IVSHMEM_BAR) +	GUEST_IVSHMEM_H2G_OFFSET;
 
 	/*
 	 * Remember! That we assume the VM contains exactly one ivshmem-plain device.
@@ -442,7 +418,7 @@ static int guest_ivshmem_probe(struct pci_dev *pdev,
 			GUEST_IVSHMEM_NAME
 			": only one ivshmem device is supported\n");
 		ret = -EBUSY;
-		goto err_unmap_h2g;
+		
 	}
 
 	/* Make the per-device state available for the remove callback. */
@@ -457,8 +433,7 @@ static int guest_ivshmem_probe(struct pci_dev *pdev,
 
 	return 0;
 
-err_unmap_h2g:
-	pci_iounmap(pdev, guest->h2g_page);
+
 err_unmap_g2h:
 	pci_iounmap(pdev, guest->g2h_page);
 err_release_region:
@@ -481,9 +456,7 @@ static void guest_ivshmem_remove(struct pci_dev *pdev)
 
 	pci_set_drvdata(pdev, NULL);
 	WARN_ON_ONCE(READ_ONCE(guest_ivshmem) != guest);
-  WRITE_ONCE(guest_ivshmem, NULL);
-	pci_iounmap(pdev, guest->h2g_page);
-	pci_iounmap(pdev, guest->g2h_page);
+  	WRITE_ONCE(guest_ivshmem, NULL);
 	pci_release_region(pdev, GUEST_IVSHMEM_BAR);
 	pci_disable_device(pdev);
 	kfree(guest);
