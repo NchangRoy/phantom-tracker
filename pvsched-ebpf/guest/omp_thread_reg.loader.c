@@ -2,50 +2,49 @@
 /*
  * Loader for omp_thread_reg.bpf.c — skeleton-based approach.
  *
- * Attaches two uprobes to libgomp (x86-64), both system-wide (-1):
- *   1. capture_omp_master_thread → GOMP_parallel   (by exported symbol name)
- *   2. capture_omp_worker_threads → gomp_thread_start (by raw file offset,
- *      discovered at runtime via disassembly since the symbol is stripped)
+ * Attaches to libgomp (x86-64), system-wide (-1):
+ *   1. capture_omp_master_thread  → GOMP_parallel        (uprobe, exported symbol name)
+ *   2. capture_omp_worker_threads → usdt:gomp:gomp_thread_start
+ *
+ * The libgomp path is fixed at build time via the LIBGOMP_PATH make
+ * variable, e.g.:
+ *
+ *   make LIBGOMP_PATH=/home/fureh_mitoto/gcc-install/lib64/libgomp.so.1
+ *
+ * libbpf cannot pin a USDT link (bpf_program__attach_usdt() may attach
+ * several underlying uprobes — one per inlined call site — behind a single
+ * synthetic bpf_link, and that wrapper type has no pin support). So unlike
+ * the other four links here, capture_omp_worker_threads only stays attached
+ * for as long as this process is alive: it blocks until SIGINT/SIGTERM
+ * instead of pinning-then-exiting.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <stdint.h>
+#include <signal.h>
+#include <unistd.h>
 #include <bpf/libbpf.h>
 #include <bpf/bpf.h>
 #include "omp_thread_reg.skel.h"
-#include "extract_addr.h"
 
-#define PIN_WORKER_LINK "/sys/fs/bpf/links/worker"
+#ifndef LIBGOMP_PATH
+#error "LIBGOMP_PATH is not set. Build with: make LIBGOMP_PATH=/path/to/libgomp.so.1"
+#endif
+
 #define PIN_OMP_THREADS_MAP "/sys/fs/bpf/omp_threads_map"
 #define PIN_MASTER_LINK "/sys/fs/bpf/links/master"
 #define PIN_SWITCH_LINK "/sys/fs/bpf/links/sched_switch"
 #define PIN_EXIT_LINK "/sys/fs/bpf/links/sched_process_exit"
 #define PIN_EXEC_LINK "/sys/fs/bpf/links/sched_process_exec"
-/*
- * find_libgomp - locate the x86-64 libgomp shared library via ldconfig.
- * Filters for x86-64 so it doesn't return the x32 or i386 variant.
- */
-static int find_libgomp(char *buf, size_t bufsz)
+
+static volatile sig_atomic_t exiting = 0;
+
+static void handle_signal(int sig)
 {
-    FILE *f = popen(
-        "ldconfig -p | grep 'libgomp\\.so' | grep 'x86-64' "
-        "| awk '{print $NF}' | head -1", "r");
-    if (!f) { perror("popen ldconfig"); return -1; }
-
-    if (!fgets(buf, bufsz, f)) {
-        fprintf(stderr, "error: libgomp (x86-64) not found via ldconfig\n");
-        pclose(f); return -1;
-    }
-    pclose(f);
-    buf[strcspn(buf, "\n")] = '\0';
-
-    if (buf[0] == '\0') {
-        fprintf(stderr, "error: ldconfig returned empty path for libgomp\n");
-        return -1;
-    }
-    return 0;
+    (void)sig;
+    exiting = 1;
 }
 
 int main(void)
@@ -53,23 +52,12 @@ int main(void)
     struct omp_thread_reg_bpf *skel  = NULL;
     struct bpf_link            *link = NULL, *worker_link = NULL, *switch_link = NULL;
     struct bpf_link            *exit_link = NULL, *exec_link = NULL;
-    char    libgomp_path[512] = {0};
+
     int     err = 0;
-    uint64_t worker_offset = 0;
+    const char *libgomp_path = LIBGOMP_PATH;
 
-    /* 1 — find libgomp path */
-    if (find_libgomp(libgomp_path, sizeof(libgomp_path)) < 0)
-        return 1;
-    printf("libgomp : %s\n", libgomp_path);
-
-    /* 2 — find gomp_thread_start offset via disassembly */
-    worker_offset = find_gomp_thread_start_offset(libgomp_path);
-    if (!worker_offset) {
-        fprintf(stderr, "error: could not find gomp_thread_start offset in %s\n",
-                libgomp_path);
-        return 1;
-    }
-    printf("gomp_thread_start offset : 0x%lx\n", worker_offset);
+    signal(SIGINT, handle_signal);
+    signal(SIGTERM, handle_signal);
 
     /* 3 — load BPF skeleton */
     skel = omp_thread_reg_bpf__open_and_load();
@@ -95,36 +83,35 @@ int main(void)
     }
     printf("Attached → %s : GOMP_parallel          (master)\n", libgomp_path);
 
-    //pin links
-
-    /* 4b — attach worker probe: gomp_thread_start (raw offset, symbol stripped) */
-    worker_link = bpf_program__attach_uprobe_opts(
+    /* 4b — attach worker probe: usdt:gomp:gomp_thread_start */
+    worker_link = bpf_program__attach_usdt(
         skel->progs.capture_omp_worker_threads,
-        -1, libgomp_path, worker_offset, NULL);
+        -1,
+        libgomp_path,
+        "gomp",
+        "gomp_thread_start",
+         NULL);
 
     err = libbpf_get_error(worker_link);
     if (err) {
         worker_link = NULL;
-        fprintf(stderr, "failed to attach uprobe → %s+0x%lx: %s\n",
-                libgomp_path, worker_offset, strerror(-err));
+        fprintf(stderr, "failed to attach usdt probe to binary %s: %s\n",
+                libgomp_path, strerror(-err));
         goto cleanup;
     }
 
-    //pin links
+    //pin links (worker_link is a USDT link, which libbpf cannot pin — it
+    //stays attached only for as long as this process keeps running)
     if (bpf_link__pin(link, PIN_MASTER_LINK) < 0) {
         perror("pin master link");
-        goto cleanup;
-    }
-    if (bpf_link__pin(worker_link, PIN_WORKER_LINK) < 0) {
-        perror("pin worker link");
         goto cleanup;
     }
     if (bpf_map__pin(skel->maps.omp_threads_map, PIN_OMP_THREADS_MAP) < 0) {
         perror("pin omp_threads_map");
         goto cleanup;
     }
-    printf("Attached → %s+0x%lx : gomp_thread_start (workers)\n",
-           libgomp_path, worker_offset);
+    printf("Attached → %s : gomp:gomp_thread_start (workers)\n",
+           libgomp_path);
 
     /* 4c — attach sched_switch tracepoint */
     switch_link = bpf_program__attach(skel->progs.handle_switch);
@@ -169,6 +156,13 @@ int main(void)
         goto cleanup;
     }
     printf("Attached → tp/sched/sched_process_exec    (remove_execed_omp_thread)\n");
+
+    printf("\nAll programs attached. Running... Press Ctrl+C to exit.\n");
+
+    while (!exiting)
+        sleep(1);
+
+    printf("\nExiting and detaching programs...\n");
 
 cleanup:
     bpf_link__destroy(exec_link);

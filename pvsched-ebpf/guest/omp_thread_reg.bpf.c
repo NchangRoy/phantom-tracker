@@ -7,6 +7,7 @@
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
+#include<bpf/usdt.bpf.h>
 #include "pvsched.h"
 
 char LICENSE[] SEC("license") = "GPL";
@@ -47,10 +48,10 @@ int capture_omp_master_thread(struct pt_regs *ctx)
 }
 
 /*
- * Uprobe on gomp_thread_start (libgomp).
+ * Uprobe on gomp_thread_start (libgomp) usdt  probe.
  * Fires when an OpenMP  worker thread starts.
  */
-SEC("uprobe")
+SEC("usdt")
 int capture_omp_worker_threads(struct pt_regs *ctx)
 {
 	__u32 tid = (__u32)bpf_get_current_pid_tgid();
