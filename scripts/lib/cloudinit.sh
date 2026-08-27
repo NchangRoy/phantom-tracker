@@ -153,10 +153,18 @@ write_files:
 
       echo "******** Building omp_thread_reg BPF program ********"
       cd \$HOME/phantom-tracker/pvsched-ebpf/guest
-      make
+      LIBGOMP_PATH=\$(ldconfig -p | grep 'libgomp\.so' | grep 'x86-64' | awk '{print \$NF}' | head -1)
+      if [ -z "\$LIBGOMP_PATH" ]; then
+        echo "error: libgomp (x86-64) not found via ldconfig" >&2
+        exit 1
+      fi
+      make LIBGOMP_PATH="\$LIBGOMP_PATH"
 
       echo "******** Starting omp_thread_reg BPF program ********"
-      ./omp_thread_reg.loader
+      # Backgrounded: the loader blocks forever to keep its USDT worker-thread
+      # probe attached (libbpf can't pin that link type), so it can't run
+      # inline in this oneshot setup script.
+      ./omp_thread_reg.loader &
 
       echo "******** guest_ivshmem_driver_setup.sh complete ********"
   - path: /etc/systemd/system/phantom-tracker.service
