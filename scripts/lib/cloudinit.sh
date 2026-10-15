@@ -10,7 +10,7 @@
 # Provides:
 #   cloudinit_check_deps            — verify required tools are installed
 #   cloudinit_make_iso <out.iso> \  — write a cloud-init seed ISO
-#       <hostname> <ssh-pubkey>
+#       <hostname> <ssh-pubkey> <password> <vm-type>
 
 # shellcheck source=distro.sh
 . "$(dirname "${BASH_SOURCE[0]}")/distro.sh"
@@ -55,12 +55,13 @@ cloudinit_create_overlay() {
 }
 
 # Generate a cloud-init seed ISO with user-data and meta-data.
-# Usage: cloudinit_make_iso <out.iso> <hostname> <ssh-pubkey-string> <password>
+# Usage: cloudinit_make_iso <out.iso> <hostname> <ssh-pubkey-string> <password> <vm-type>
 cloudinit_make_iso() {
     local iso="$1"
     local hostname="$2"
     local ssh_pubkey="$3"
     local password="$4"
+    local vm_type="$5"
     if [[ -f "$iso" ]]; then
         echo "seed ISO already present: $iso"
         return 0
@@ -86,6 +87,23 @@ package_upgrade: false
 packages:
   - qemu-guest-agent
   - openssh-server
+EOF
+
+    if [[ "$vm_type" == "target" ]]; then
+        cat >> "$tmpdir/user-data" <<EOF
+  - make
+  - bpftool
+  - gcc-bpf
+  - libbpf-dev
+  - linux-headers-6.1.0-52-amd64
+  - pahole
+  - linux-source-6.1
+  - libelf-dev
+  - zlib1g-dev
+EOF
+    fi
+
+    cat >> "$tmpdir/user-data" <<EOF
 runcmd:
   - systemctl enable --now ssh
   - systemctl enable --now qemu-guest-agent

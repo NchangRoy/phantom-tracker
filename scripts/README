@@ -16,6 +16,17 @@ per-VM qcow2 overlay disk, generates a cloud-init seed ISO, and boots the VM.
 Subsequent runs with the same --name skip provisioning and boot straight from
 the existing disk.
 
+For --type=target, cloud-init also installs the guest build and BPF packages:
+make, bpftool, gcc-bpf, libbpf-dev, linux-headers-6.1.0-52-amd64, pahole,
+linux-source-6.1, libelf-dev, and zlib1g-dev. Noise VMs only receive the common
+qemu-guest-agent and openssh-server packages.
+
+These packages are installed during first-boot provisioning only. Existing
+VM disks and seed ISOs are reused; install the packages manually in an
+existing guest or re-provision it as shown below. The pinned headers package
+must be available in the guest's Debian repositories and match the kernel
+used to build and load guest modules.
+
 Once the VM has booted (first boot takes 1-2 minutes for cloud-init):
 
     ssh -p 2222 debian@localhost
