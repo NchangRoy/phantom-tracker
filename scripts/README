@@ -52,6 +52,8 @@ Required:
   --ssh-pubkey=<path>   Path to an SSH public key file to inject into the VM.
 
 Optional:
+  --mode=<user|dev>     VM mode (default: user). Host directory sharing is
+                        enabled only in dev mode for development and testing.
   --password=<pass>     Password for the debian user (default: debian).
   --sockets=<n>         Number of CPU sockets (default: 1).
   --cores=<n>           Number of cores per socket (default: 2).
@@ -75,8 +77,11 @@ Optional:
   --socket-nr=<n>       NUMA node number to pin to. Required when
                         --pin-to-socket=true.
 
-  --shared-dir=<path>  Host directory to create if absent and share read-write
-                        via 9p (default: disabled). Guest mount tag: hostshare.
+  --shared-dir=<path>  Host directory to create if absent and share read-only
+                        via 9p in dev mode (default: disabled). Ignored in user
+                        mode. Guest mount tag: hostshare.
+  --shared-dir-readonly=<bool>
+                        Enforce read-only access in QEMU (default: true).
 
 Pass --help for a summary.
 
@@ -102,28 +107,40 @@ Minimal VM, 2 vCPUs, 4G RAM:
         --pin-to-socket=true --socket-nr=0 \
         --add-vsock=true --vsock-cid=4
 
-VM with a shared host directory (works with new and existing disks):
+Development VM with a shared host directory (new or existing disks):
 
     bash create_vm.sh \
         --name=foo \
         --type=target \
         --ssh-pubkey=~/.ssh/id_ed25519.pub \
-        --shared-dir=./shared
+        --mode=dev --shared-dir=./shared
 
-The script creates ./shared on the host if needed and prints the guest mount
-commands. After booting, run inside the guest:
+The shared directory supports development and testing of Phantom Tracker,
+including making host sources and build artifacts available in the guest.
+The default user mode does not attach a shared directory, even if
+--shared-dir is supplied. In dev mode, the script creates ./shared on the
+host if needed and prints the guest mount commands. After booting, run
+inside the guest:
 
     sudo mkdir -p /mnt/hostshare
-    sudo mount -t 9p -o trans=virtio,version=9p2000.L hostshare /mnt/hostshare
+    sudo mount -t 9p -o trans=virtio,version=9p2000.L,ro hostshare /mnt/hostshare
 
 Mount again after each guest reboot, or add this line to the guest's
 /etc/fstab for automatic mounting:
 
-    hostshare /mnt/hostshare 9p trans=virtio,version=9p2000.L,nofail 0 0
+    hostshare /mnt/hostshare 9p trans=virtio,version=9p2000.L,ro,nofail 0 0
 
-Start the VM with the same --shared-dir each time. Host access uses the
-account running QEMU; guest permissions may require sudo to write to the
-share. Omitting --shared-dir disables sharing.
+Start the VM with --mode=dev and the same --shared-dir each time. QEMU enforces
+read-only access, even if the guest tries to remount read-write. To allow writes, 
+use --shared-dir-readonly=false and mount with rw instead of ro. Host access
+uses the account running QEMU. Omitting --shared-dir disables sharing.
+
+Sharing uses security_model=none to expose ordinary host files and symlinks,
+including build trees copied into the share on the host. Keep copied symlink 
+targets within the shared tree, using relative links where possible. Absolute
+host paths resolve in the guest's filesystem. In case the need of changing the
+sharing mode, shut down and relaunch QEMU, then remount the share. A guest-only
+reboot does not change the QEMU export settings.
 
 Re-provision a VM (delete its disk and seed ISO first):
 
@@ -172,6 +189,4 @@ Optional:
   systemd-run           For per-VM cgroups (part of systemd, present on most
                         distros).
   9p sharing            For --shared-dir: QEMU must support 9p, and the guest
-                        kernel must support 9p and 9pnet_virtio. The host
-                        filesystem must support extended attributes for
-                        the mapped-xattr security model.
+                        kernel must support 9p and 9pnet_virtio.
