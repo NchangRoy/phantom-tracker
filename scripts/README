@@ -64,6 +64,9 @@ Optional:
   --socket-nr=<n>       NUMA node number to pin to. Required when
                         --pin-to-socket=true.
 
+  --shared-dir=<path>  Host directory to create if absent and share read-write
+                        via 9p (default: disabled). Guest mount tag: hostshare.
+
 Pass --help for a summary.
 
 
@@ -87,6 +90,29 @@ Minimal VM, 2 vCPUs, 4G RAM:
         --mem=45G \
         --pin-to-socket=true --socket-nr=0 \
         --add-vsock=true --vsock-cid=4
+
+VM with a shared host directory (works with new and existing disks):
+
+    bash create_vm.sh \
+        --name=foo \
+        --type=target \
+        --ssh-pubkey=~/.ssh/id_ed25519.pub \
+        --shared-dir=./shared
+
+The script creates ./shared on the host if needed and prints the guest mount
+commands. After booting, run inside the guest:
+
+    sudo mkdir -p /mnt/hostshare
+    sudo mount -t 9p -o trans=virtio,version=9p2000.L hostshare /mnt/hostshare
+
+Mount again after each guest reboot, or add this line to the guest's
+/etc/fstab for automatic mounting:
+
+    hostshare /mnt/hostshare 9p trans=virtio,version=9p2000.L,nofail 0 0
+
+Start the VM with the same --shared-dir each time. Host access uses the
+account running QEMU; guest permissions may require sudo to write to the
+share. Omitting --shared-dir disables sharing.
 
 Re-provision a VM (delete its disk and seed ISO first):
 
@@ -134,3 +160,7 @@ First-boot provisioning only:
 Optional:
   systemd-run           For per-VM cgroups (part of systemd, present on most
                         distros).
+  9p sharing            For --shared-dir: QEMU must support 9p, and the guest
+                        kernel must support 9p and 9pnet_virtio. The host
+                        filesystem must support extended attributes for
+                        the mapped-xattr security model.

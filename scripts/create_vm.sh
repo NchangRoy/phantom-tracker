@@ -44,8 +44,19 @@ declare_arg vsock-cid      optional "Guest CID for vhost-vsock (required when --
 declare_arg per-vm-cgroups    optional "Use cgroups for the VM" true
 declare_arg pin-to-socket     optional "Pin VM to a specific NUMA node" false
 declare_arg socket-nr         optional "NUMA node number (required when --pin-to-socket=true)"
+declare_arg shared-dir        optional "Host directory to create and share via 9p (guest mount tag: hostshare)" ""
 
 parse_args "$@" # parse all space-separated args
+
+SHARED_DIR_QEMU_ARGS=()
+if [[ -n "${ARG_SHARED_DIR:-}" ]]; then
+    mkdir -p -- "$ARG_SHARED_DIR"
+    ARG_SHARED_DIR="$(realpath -- "$ARG_SHARED_DIR")"
+    # QEMU key-value options escape literal commas by doubling them.
+    SHARED_DIR_QEMU_ARGS=(
+        -virtfs "local,id=hostshare,path=${ARG_SHARED_DIR//,/,,},mount_tag=hostshare,security_model=mapped-xattr"
+    )
+fi
 
 if [[ -z "${ARG_SSH_PORT:-}" ]]; then
     ARG_SSH_PORT="$(find_free_tcp_port 2222)"
@@ -158,6 +169,11 @@ echo "type: $ARG_TYPE"
 echo "ssh-port: $ARG_SSH_PORT"
 echo "pin-to-socket: $ARG_PIN_TO_SOCKET"
 echo "socket-nr: ${ARG_SOCKET_NR:-}"
+
+if [[ -n "${ARG_SHARED_DIR:-}" ]]; then
+    echo "shared-dir: $ARG_SHARED_DIR (read-write, guest mount tag: hostshare)"
+fi
+
 if [[ "$ARG_TYPE" == "target" ]]; then
     echo "hostbackend-device: ${HOSTBACKEND_DEVICE:-unavailable}"
 fi
@@ -196,6 +212,7 @@ QEMU_CMD=(
     -smp "$CPU_TOPOLOGY"
     -drive "file=$DISK_IMG,format=qcow2,if=virtio"
     "${IVSHMEM_QEMU_ARGS[@]}"
+    "${SHARED_DIR_QEMU_ARGS[@]}"
     "${SEED_ISO_ARG[@]}"
     -net nic,model=virtio
     -net "user,hostfwd=tcp::${ARG_SSH_PORT}-:22"
@@ -233,6 +250,13 @@ echo "launching VM:"
 printf '  %q' "${QEMU_CMD[@]}" # Print the full qemu command
 printf '\n'
 echo "once booted, SSH in with: ssh -p $ARG_SSH_PORT debian@localhost"
+
+if [[ -n "${ARG_SHARED_DIR:-}" ]]; then
+    echo "mount the shared directory inside the guest with:"
+    echo "  sudo mkdir -p /mnt/hostshare"
+    echo "  sudo mount -t 9p -o trans=virtio,version=9p2000.L hostshare /mnt/hostshare"
+fi
+
 if [[ -n "${SEED_ISO_ARG[*]}" ]]; then
     echo "note: first boot runs cloud-init, SSH may take 1-2 minutes to become available"
 fi
