@@ -58,6 +58,9 @@ dkms.conf
 *.qcow2
 *.iso
 
+# Host-guest development share
+/hg_shared_dir/
+
 # Generated BPF headers
 vmlinux.h
 pvsched-ebpf/host/h2g_msg_timer_loader
