@@ -10,6 +10,9 @@
 
 set -euo pipefail # exit on error, unset variable, or failed pipeline
 
+# Non-root shells may omit system tools such as bpftool and modprobe.
+export PATH="${PATH}:/usr/local/sbin:/usr/sbin:/sbin"
+
 arch="$(uname -m)"
 if [[ "$arch" != "x86_64" ]]; then
     echo "error: unsupported host architecture: $arch (x86_64 required)" >&2
