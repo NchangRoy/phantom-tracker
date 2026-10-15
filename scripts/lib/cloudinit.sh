@@ -92,6 +92,8 @@ EOF
     if [[ "$vm_type" == "target" ]]; then
         cat >> "$tmpdir/user-data" <<EOF
   - make
+  - gcc
+  - gfortran
   - bpftool
   - gcc-bpf
   - libbpf-dev
