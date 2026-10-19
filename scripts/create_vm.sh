@@ -74,7 +74,11 @@ if [[ "$ARG_SHARED_DIR_READONLY" == true ]]; then
 fi
 
 SHARED_DIR_QEMU_ARGS=()
+AUTO_MOUNT_HOSTSHARE=false
 if [[ "$ARG_MODE" == dev && -n "${ARG_SHARED_DIR:-}" ]]; then
+    if [[ "$ARG_TYPE" == target ]]; then
+        AUTO_MOUNT_HOSTSHARE=true
+    fi
     mkdir -p -- "$ARG_SHARED_DIR"
     ARG_SHARED_DIR="$(realpath -- "$ARG_SHARED_DIR")"
     # Use native host files and symlinks, including trees copied into the share.
@@ -146,6 +150,10 @@ if [[ "$ARG_TYPE" == "target" ]]; then
     create_pvsched_shmem_setup
 
     cleanup_target_pvsched_shmem() {
+        if [[ -n "${mount_worker:-}" ]]; then
+            kill "$mount_worker" 2>/dev/null || true
+            wait "$mount_worker" 2>/dev/null || true
+        fi
         if ! create_pvsched_shmem_cleanup; then
             echo "warning: failed to fully clean up host_ivshmem resources" >&2
         fi
@@ -283,7 +291,9 @@ printf '  %q' "${QEMU_CMD[@]}" # Print the full qemu command
 printf '\n'
 echo "once booted, SSH in with: ssh -p $ARG_SSH_PORT debian@localhost"
 
-if [[ "$ARG_MODE" == dev && -n "${ARG_SHARED_DIR:-}" ]]; then
+if [[ "$AUTO_MOUNT_HOSTSHARE" == true ]]; then
+    echo "shared-dir: will mount automatically at /mnt/hostshare once guest SSH is ready"
+elif [[ "$ARG_MODE" == dev && -n "${ARG_SHARED_DIR:-}" ]]; then
     echo "mount the shared directory inside the guest with:"
     echo "  sudo mkdir -p /mnt/hostshare"
     echo "  sudo mount -t 9p -o trans=virtio,version=9p2000.L,$SHARED_DIR_ACCESS hostshare /mnt/hostshare"
@@ -294,6 +304,11 @@ if [[ -n "${SEED_ISO_ARG[*]}" ]]; then
 fi
 echo "starting in 10 seconds..." # Sleep before starting to give the user a chance to read the output and cancel if something looks wrong
 sleep 10
+mount_worker=""
+if [[ "$AUTO_MOUNT_HOSTSHARE" == true ]]; then
+    ssh_mount_hostshare "$ARG_SSH_PORT" "$ARG_SSH_PUBKEY" "$SHARED_DIR_ACCESS" &
+    mount_worker=$!
+fi
 set +e
 "${QEMU_CMD[@]}"
 qemu_rc=$?
