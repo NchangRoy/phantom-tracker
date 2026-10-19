@@ -17,9 +17,10 @@ Subsequent runs with the same --name skip provisioning and boot straight from
 the existing disk.
 
 For --type=target, cloud-init also installs the guest build and BPF packages:
-make, bpftool, gcc-bpf, libbpf-dev, linux-headers-6.1.0-52-amd64, pahole,
-linux-source-6.1, libelf-dev, and zlib1g-dev. Noise VMs only receive the common
-qemu-guest-agent and openssh-server packages.
+make, gcc, gfortran, bpftool, gcc-bpf, libbpf-dev,
+linux-headers-6.1.0-52-amd64, pahole, linux-source-6.1, libelf-dev, and
+zlib1g-dev. Noise VMs only receive the common qemu-guest-agent and
+openssh-server packages.
 
 These packages are installed during first-boot provisioning only. Existing
 VM disks and seed ISOs are reused; install the packages manually in an
