@@ -15,6 +15,12 @@ set -euo pipefail
 create_pvsched_shmem_check_deps() {
     local missing=0
 
+    check_cmd udevadm udev fedora=systemd-udev rhel=systemd-udev arch=systemd || missing=1
+    if ! getent group kvm >/dev/null; then
+        echo "error: the kvm group is required for host_ivshmem device access" >&2
+        return 1
+    fi
+
     if ! command -v make &>/dev/null; then
         echo "error: required tool not found: make" >&2
         echo "  install it with:" >&2
@@ -54,6 +60,14 @@ create_pvsched_shmem_setup() {
         return 1
     fi
 
+    local -a privileged=()
+    if [[ "$EUID" -ne 0 ]]; then
+        privileged=(sudo)
+    fi
+    echo "installing host_ivshmem device permissions for the kvm group"
+    "${privileged[@]}" install -m 0644 "$host_dir/99-host-ivshmem.rules" /etc/udev/rules.d/99-host-ivshmem.rules
+    "${privileged[@]}" udevadm control --reload-rules
+
     if grep -qE '^host_ivshmem[[:space:]]' /proc/modules; then
         echo "host_ivshmem kernel module already loaded"
     else
@@ -73,6 +87,10 @@ create_pvsched_shmem_setup() {
             sudo modprobe host_ivshmem
         fi
     fi
+
+    # Also apply the rule when the module was already loaded before setup.
+    "${privileged[@]}" udevadm trigger --action=change --subsystem-match=host_ivshmem
+    "${privileged[@]}" udevadm settle
 }
 
 create_pvsched_shmem_cleanup() {

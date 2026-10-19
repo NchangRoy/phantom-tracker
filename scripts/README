@@ -178,6 +178,12 @@ Runtime (checked at startup):
   qemu-system-x86_64    Debian/Ubuntu: qemu-system-x86
                         Fedora/RHEL:   qemu-kvm
   numactl               All distros:   numactl
+  udevadm               For target VM host-device permissions (Debian: udev).
+
+Target VM users must belong to the host's kvm group. Host module setup installs
+a udev rule granting that group read/write access to /dev/host_ivshmem and
+waits for udev before launching QEMU. After adding group membership, log out
+and log back in for it to take effect.
 
 First-boot provisioning only:
   wget                  For downloading the base cloud image.
