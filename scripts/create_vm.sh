@@ -211,7 +211,6 @@ SEED_ISO="${ARG_NAME}-seed.iso"
 
 if [[ -f "$DISK_IMG" ]]; then
     echo "disk image $DISK_IMG already exists, booting from it"
-    SEED_ISO_ARG=()
 else
     cloudinit_check_deps
     if [[ ! -f "$ARG_SSH_PUBKEY" ]]; then
@@ -222,6 +221,12 @@ else
     cloudinit_fetch_base_image "$ARG_BASE_IMAGE"
     cloudinit_create_overlay   "$ARG_BASE_IMAGE" "$DISK_IMG" "$ARG_DISK_SIZE"
     cloudinit_make_iso         "$SEED_ISO" "$ARG_NAME" "$SSH_PUBKEY_STR" "$ARG_PASSWORD" "$ARG_TYPE"
+fi
+
+# A previous launch may have failed before cloud-init ran. Keep the seed
+# attached on retries; cloud-init tracks completed provisioning in the guest.
+SEED_ISO_ARG=()
+if [[ -f "$SEED_ISO" ]]; then
     SEED_ISO_ARG=(-drive "file=$SEED_ISO,format=raw,if=virtio,readonly=on")
 fi
 
