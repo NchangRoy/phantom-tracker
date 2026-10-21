@@ -20,6 +20,12 @@ For the scheduler noise workload used in development experiments,
 [dev-tools/stress-ng](dev-tools/stress-ng/README) builds a pinned stress-ng
 binary on the host for distribution to multiple noise VMs.
 
+## Usage guides
+
+- [VM creation and provisioning](Documentation/vm-creation.md)
+- [Host–guest development sharing](Documentation/host-guest-sharing.md)
+- [Script helper libraries](Documentation/script-libraries.md)
+
 ## References
 [1] https://inria.hal.science/tel-05438117v2
 
