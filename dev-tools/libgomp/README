@@ -1,0 +1,210 @@
+Guest-compatible libgomp builds
+==============================
+
+This is a contributor tool for developing and testing Phantom Tracker's
+libgomp changes before they are available in upstream GCC packages. It
+provides a Debian 12 amd64 build environment matching the guests currently
+provisioned by scripts/create_vm.sh. Compilation runs on the host in a
+container; GCC does not need to be built or installed in the guests.
+
+The container is independent of VM creation, the pvsched driver, and eBPF
+builds. It is not required by users installing packaged components. Once
+compatible GCC packages provide the changes, this tool can be retired.
+
+Only the build environment and these instructions live in this repository.
+Keep GCC sources, patches, build output, and published runtimes outside it.
+
+
+Build on the host
+-----------------
+
+Requires Docker on an x86_64 Linux host and permission to access its daemon.
+Use sudo docker instead of docker if your account cannot access the socket.
+Run from the Phantom Tracker root:
+
+    docker build --platform linux/amd64 \
+        -t phantom-libgomp:debian12 dev-tools/libgomp
+
+Set paths to an existing GCC source tree containing the desired changes
+and a new, empty build directory outside the repository:
+
+    GCC_SOURCE="$HOME/src/gcc"
+    GCC_BUILD="$HOME/src/build/gcc-baseline"
+    mkdir -p "$GCC_BUILD"
+
+Use a fresh build directory for each source revision or configuration.
+Do not reuse objects built against the host's glibc. For a Git checkout,
+record the source revision and tracked changes before building:
+
+    test "$(git -C "$GCC_SOURCE" branch --show-current)" = baseline
+    test "$(git -C "$GCC_SOURCE" rev-parse HEAD)" = "$(git -C "$GCC_SOURCE" rev-parse baseline-v0)"
+    test -z "$(git -C "$GCC_SOURCE" status --porcelain)"
+    GCC_REVISION=$(git -C "$GCC_SOURCE" rev-parse HEAD)
+    SOURCE_DATE_EPOCH=$(git -C "$GCC_SOURCE" show -s --format=%ct HEAD)
+    BUILD_IMAGE=$(docker image inspect --format '{{.Id}}' phantom-libgomp:debian12)
+    printf '%s\n' "$GCC_REVISION" > "$GCC_BUILD/source-revision.txt"
+    printf '%s\n' "$SOURCE_DATE_EPOCH" > "$GCC_BUILD/source-date-epoch.txt"
+    git -C "$GCC_SOURCE" diff --binary HEAD > "$GCC_BUILD/source-changes.patch"
+    git -C "$GCC_SOURCE" status --short > "$GCC_BUILD/source-status.txt"
+    printf '%s\n' "$BUILD_IMAGE" > "$GCC_BUILD/container-image.txt"
+
+Run the checks above in a shell with set -e, or stop if any check fails.
+This baseline uses the clean baseline branch at baseline-v0; select a new
+reference and build directory for modified sources. Keep the source tree
+unchanged throughout the build. The patch records tracked changes only.
+
+Build with the source mounted read-only and output owned by your host user:
+
+    docker run --rm --platform linux/amd64 \
+        --user "$(id -u):$(id -g)" \
+        --mount "type=bind,src=$GCC_SOURCE,dst=/src,readonly" \
+        --mount "type=bind,src=$GCC_BUILD,dst=/build" \
+        --env SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
+        --env LC_ALL=C --env TZ=UTC --env BUILD_JOBS="$(nproc)" \
+        "$BUILD_IMAGE" bash -c '
+            set -euo pipefail
+            dpkg-query -W > build-packages.txt
+            /src/configure \
+                --build=x86_64-pc-linux-gnu \
+                --host=x86_64-pc-linux-gnu \
+                --target=x86_64-pc-linux-gnu \
+                --disable-bootstrap \
+                --disable-multilib \
+                --disable-nls \
+                --disable-libcc1 \
+                --enable-languages=c \
+                --with-arch=x86-64 --with-tune=generic \
+                CFLAGS="-O2 -g -ffile-prefix-map=/src=/usr/src/gcc -ffile-prefix-map=/build=/usr/src/gcc-build" \
+                CXXFLAGS="-O2 -g -ffile-prefix-map=/src=/usr/src/gcc -ffile-prefix-map=/build=/usr/src/gcc-build" \
+                CFLAGS_FOR_TARGET="-O2 -g -ffile-prefix-map=/src=/usr/src/gcc -ffile-prefix-map=/build=/usr/src/gcc-build" \
+                2>&1 | tee configure.log
+            make -j"$BUILD_JOBS" all-target-libgomp 2>&1 | tee build.log
+            lib=x86_64-pc-linux-gnu/libgomp/.libs/libgomp.so.1
+            test -r "$lib"
+            readelf -d "$lib" > runtime-dynamic.txt
+            readelf --version-info "$lib" > runtime-versions.txt
+            readelf -n "$lib" > runtime-notes.txt
+            ldd "$lib" > runtime-dependencies.txt
+            sha256sum "$(readlink -f "$lib")" > runtime-sha256.txt
+        '
+
+The build stops when all-target-libgomp succeeds. This target builds the C
+compiler and libgcc prerequisites, then libgomp; it does not build the other
+GCC runtimes or install GCC. Do not interrupt a general make when a library
+file first appears: publication requires successful target completion.
+
+Only the C front end is enabled to reduce build time. libgomp's Fortran ABI
+wrappers (fortran.c) are included regardless; applications can still use the
+guest's native gfortran. Compiler-specific omp_lib/OpenACC Fortran modules
+from the custom GCC are outside this runtime-only workflow.
+
+BUILD_JOBS uses the number of processing units available to the host shell,
+as reported by nproc. The runtime is produced at:
+
+    <GCC_BUILD>/x86_64-pc-linux-gnu/libgomp/.libs/libgomp.so.1
+
+Inspect runtime-dependencies.txt for missing libraries, runtime-versions.txt
+for symbol requirements, and runtime-notes.txt for expected USDT probes in
+patched builds. A baseline without those patches need not have the probes.
+
+Use the same source revision and configure options for baseline and modified
+builds, except for the changes under comparison. Avoid -march=native when
+publishing a runtime for guests with different exposed CPU features.
+
+GCC build prerequisites and configuration options:
+https://gcc.gnu.org/install/prerequisites.html
+https://gcc.gnu.org/install/configure.html
+
+
+Publish and use in guests
+-------------------------
+
+Publish only completed runtime files to a new host directory, preserving
+relative symlinks. For example:
+
+    LIBGOMP_RELEASE="$PWD/hg_shared_dir/libgomp/baseline-v0"
+    mkdir -p "$(dirname "$LIBGOMP_RELEASE")"
+    mkdir "$LIBGOMP_RELEASE"
+    cp -a "$GCC_BUILD"/x86_64-pc-linux-gnu/libgomp/.libs/libgomp.so* \
+        "$LIBGOMP_RELEASE/"
+    cp "$GCC_BUILD"/source-* "$GCC_BUILD/container-image.txt" \
+        "$GCC_BUILD/build-packages.txt" "$GCC_BUILD/configure.log" \
+        "$GCC_BUILD"/runtime-*.txt \
+        "$LIBGOMP_RELEASE/"
+
+Preserve this directory unchanged while guests use it. Publish each new
+build to a different directory. Several identical Debian 12 amd64 guests
+can use the same completed release; each VM has its own qcow2 disk.
+
+Start each VM from the project root with --mode=dev --shared-dir=./hg_shared_dir
+(or ../hg_shared_dir when running from scripts/). Sharing is read-only by
+default. Follow scripts/README to mount it at /mnt/hostshare.
+The container does not need to remain running. Its published host directory
+is what QEMU exports.
+
+Use 9p only to transfer the completed release. Inside each guest, copy it
+onto the guest's own disk before linking, running applications, or attaching
+USDT probes:
+
+    GUEST_LIBGOMP="$HOME/libgomp-releases/baseline-v0"
+    mkdir -p "$(dirname "$GUEST_LIBGOMP")"
+    mkdir -- "$GUEST_LIBGOMP" && \
+        cp -a --no-preserve=ownership /mnt/hostshare/libgomp/baseline-v0/. "$GUEST_LIBGOMP/"
+
+The copy refuses to reuse an existing release directory. Keep each local
+release unchanged during experiments and use a new directory for another build. Verify that the
+library is on the guest disk rather than the 9p mount:
+
+    findmnt -T "$GUEST_LIBGOMP/libgomp.so.1" -o TARGET,FSTYPE,OPTIONS
+
+Compile applications and store results on the guest's local disk. To link
+an application with the local runtime, add these flags after its object
+files, while retaining its usual -fopenmp compilation/link options:
+
+    -L"$GUEST_LIBGOMP" -Wl,-rpath,"$GUEST_LIBGOMP" -l:libgomp.so.1
+
+The explicit library name selects the versioned shared library. Verify the
+result inside the guest:
+
+    ldd /path/to/application | grep libgomp
+
+It should resolve libgomp.so.1 to the local GUEST_LIBGOMP directory.
+Configure the eBPF loaders to attach to that same local file. On Nchang's
+branch, their build-time setting is:
+
+    make LIBGOMP_PATH="$GUEST_LIBGOMP/libgomp.so.1"
+
+System libgomp discovery via ldconfig is not sufficient when the application
+loads this custom runtime. USDT probe discovery and attachment take place
+only on the local copy; they are never attempted on the 9p volume. Verify
+the expected probes in the local library before starting the loaders:
+
+    readelf -n "$GUEST_LIBGOMP/libgomp.so.1"
+
+The required probes must be provided by the selected patched GCC sources.
+The build image includes systemtap-sdt-dev for sources using sys/sdt.h;
+check any source-specific configure options needed to enable those probes.
+This release contains only libgomp; other application runtime dependencies
+must be supplied by the guest or built for the same userspace.
+
+
+Reproducing a build
+-------------------
+
+Debian 12 provides the guest-compatible userspace, but the debian:12-slim
+tag and its apt packages can change. For repeatable experiments, retain
+the exact built container image (for example with docker image save), the
+source revision and patch, SOURCE_DATE_EPOCH, configure.log, build.log, and
+build-packages.txt. The build uses the immutable BUILD_IMAGE ID, fixed
+container paths and CPU target, UTC/C locale, and source commit timestamp.
+Preserve config.status as the exact configure invocation.
+
+These controls make inputs repeatable; byte-for-byte reproducibility still
+needs verification by a second clean build with the same inputs and a
+comparison of the published library SHA-256 hashes.
+
+BASE_IMAGE accepts a digest-pinned Debian 12 image via docker build's
+--build-arg option. A pinned base alone does not freeze packages fetched
+from apt; reusing the saved build image also preserves the installed tools.
+Building for a different guest userspace requires a corresponding build
+environment and compatibility checks in that guest.
