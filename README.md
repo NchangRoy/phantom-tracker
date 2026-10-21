@@ -16,6 +16,10 @@ Contributor instructions for building guest-compatible libgomp on the host
 are in [dev-tools/libgomp](dev-tools/libgomp/README). This development tool is
 independent of VM provisioning and is not required for packaged installations.
 
+For the scheduler noise workload used in development experiments,
+[dev-tools/stress-ng](dev-tools/stress-ng/README) builds a pinned stress-ng
+binary on the host for distribution to multiple noise VMs.
+
 ## References
 [1] https://inria.hal.science/tel-05438117v2
 
