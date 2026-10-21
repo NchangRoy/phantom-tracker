@@ -108,6 +108,12 @@ EOF
 EOF
     fi
 
+    if [[ "$mode" == "dev" ]]; then
+        cat >> "$tmpdir/user-data" <<EOF
+  - trace-cmd
+EOF
+    fi
+
     cat >> "$tmpdir/user-data" <<EOF
 runcmd:
   - systemctl enable --now ssh

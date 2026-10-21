@@ -21,6 +21,8 @@ make, gcc, gfortran, bpftool, gcc-bpf, libbpf-dev, pahole, linux-source-6.1,
 libelf-dev, and zlib1g-dev. Noise VMs receive openssh-server, plus stress-ng
 when launched with --mode=dev.
 
+Both target and noise VMs also receive trace-cmd in dev mode.
+
 Target guests then install linux-headers-$(uname -r), resolving the kernel
 version inside the guest. This is a separate, best-effort installation: an
 unavailable header package produces a warning in /var/log/cloud-init-output.log
