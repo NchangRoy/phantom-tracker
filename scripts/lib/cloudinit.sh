@@ -85,7 +85,6 @@ users:
 package_update: true
 package_upgrade: false
 packages:
-  - qemu-guest-agent
   - openssh-server
 EOF
 
@@ -97,7 +96,6 @@ EOF
   - bpftool
   - gcc-bpf
   - libbpf-dev
-  - linux-headers-6.1.0-52-amd64
   - pahole
   - linux-source-6.1
   - libelf-dev
@@ -108,8 +106,20 @@ EOF
     cat >> "$tmpdir/user-data" <<EOF
 runcmd:
   - systemctl enable --now ssh
-  - systemctl enable --now qemu-guest-agent
 EOF
+
+    if [[ "$vm_type" == "target" ]]; then
+        # Resolve the version inside the guest, not on the host generating
+        # the seed. An unavailable header package must not block the tools.
+        cat >> "$tmpdir/user-data" <<'EOF'
+  - |
+      kernel_release=$(uname -r)
+      if ! DEBIAN_FRONTEND=noninteractive apt-get install -y "linux-headers-$kernel_release"; then
+          echo "warning: kernel headers for $kernel_release could not be installed; guest module builds require matching headers" >&2
+          echo "install matching headers manually, or install a matching kernel/header pair and reboot before building modules" >&2
+      fi
+EOF
+    fi
 
     cat > "$tmpdir/meta-data" <<EOF
 instance-id: ${hostname}
