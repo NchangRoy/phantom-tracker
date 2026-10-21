@@ -228,7 +228,7 @@ else
     SSH_PUBKEY_STR="$(cat "$ARG_SSH_PUBKEY")"
     cloudinit_fetch_base_image "$ARG_BASE_IMAGE"
     cloudinit_create_overlay   "$ARG_BASE_IMAGE" "$DISK_IMG" "$ARG_DISK_SIZE"
-    cloudinit_make_iso         "$SEED_ISO" "$ARG_NAME" "$SSH_PUBKEY_STR" "$ARG_PASSWORD" "$ARG_TYPE"
+    cloudinit_make_iso         "$SEED_ISO" "$ARG_NAME" "$SSH_PUBKEY_STR" "$ARG_PASSWORD" "$ARG_TYPE" "$ARG_MODE"
 fi
 
 # A previous launch may have failed before cloud-init ran. Keep the seed

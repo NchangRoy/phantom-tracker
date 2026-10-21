@@ -10,7 +10,7 @@
 # Provides:
 #   cloudinit_check_deps            — verify required tools are installed
 #   cloudinit_make_iso <out.iso> \  — write a cloud-init seed ISO
-#       <hostname> <ssh-pubkey> <password> <vm-type>
+#       <hostname> <ssh-pubkey> <password> <vm-type> <mode>
 
 # shellcheck source=distro.sh
 . "$(dirname "${BASH_SOURCE[0]}")/distro.sh"
@@ -55,13 +55,14 @@ cloudinit_create_overlay() {
 }
 
 # Generate a cloud-init seed ISO with user-data and meta-data.
-# Usage: cloudinit_make_iso <out.iso> <hostname> <ssh-pubkey-string> <password> <vm-type>
+# Usage: cloudinit_make_iso <out.iso> <hostname> <ssh-pubkey-string> <password> <vm-type> <mode>
 cloudinit_make_iso() {
     local iso="$1"
     local hostname="$2"
     local ssh_pubkey="$3"
     local password="$4"
     local vm_type="$5"
+    local mode="$6"
     if [[ -f "$iso" ]]; then
         echo "seed ISO already present: $iso"
         return 0
@@ -100,6 +101,10 @@ EOF
   - linux-source-6.1
   - libelf-dev
   - zlib1g-dev
+EOF
+    elif [[ "$vm_type" == "noise" && "$mode" == "dev" ]]; then
+        cat >> "$tmpdir/user-data" <<EOF
+  - stress-ng
 EOF
     fi
 

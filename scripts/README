@@ -18,7 +18,8 @@ the existing disk.
 
 For --type=target, cloud-init also installs the guest build and BPF packages:
 make, gcc, gfortran, bpftool, gcc-bpf, libbpf-dev, pahole, linux-source-6.1,
-libelf-dev, and zlib1g-dev. Noise VMs only receive openssh-server.
+libelf-dev, and zlib1g-dev. Noise VMs receive openssh-server, plus stress-ng
+when launched with --mode=dev.
 
 Target guests then install linux-headers-$(uname -r), resolving the kernel
 version inside the guest. This is a separate, best-effort installation: an
