@@ -60,6 +60,8 @@ dkms.conf
 
 # Host-guest development share
 /hg_shared_dir/
+/hg_noise_shared_dir/
+/hg_noise_shared_dir/
 
 # Generated BPF headers
 vmlinux.h
