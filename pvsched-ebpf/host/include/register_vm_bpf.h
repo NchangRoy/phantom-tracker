@@ -11,6 +11,7 @@ struct vm_t {
 	__u32 collection_buff_2_index;
 	__u64 is_collectx_in_buff_1;
 	__u32 nb_vcpus;
+	__u32 h2g_history_index;
 };
 
 struct vcpu_t {
@@ -24,4 +25,13 @@ struct qmp_vpcu {
 	int threadId;
 };
 
+struct global_runnx_tracker_state{
+	__s64 global_runnx_count;
+	__u32 collection_buff_1_index;
+	__u32 collection_buff_2_index;
+	__u64 is_collectx_in_buff_1;
+	__u32 nb_cpus;
+	__u64 last_idle_avg;
+	__u64 global_runnx_avg;
+};
 #endif

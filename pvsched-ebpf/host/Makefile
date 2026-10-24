@@ -78,8 +78,30 @@ bin/timer.loader: include/timer.skel.h ebpf/timer/timer.loader.c
 
 timer: bin/timer.loader
 
+# idle_avg (global_running_tracker): computes the idle average published
+# via global_tracker_state and consumed by timer.bpf.c. Its .bpf.c #includes
+# a Makefile-generated per-CPU unrolled loop (bin/global_running_tracker_cpu_loop.h)
+# instead of looping over bpf_per_cpu_ptr() directly: this host's bpf-gcc
+# miscompiles that loop as a false "indirect call" once the surrounding
+# function is complex enough.
+bin/global_running_tracker_cpu_loop.h: | bin
+	@for i in $$(seq 0 $$(($$(nproc) - 1))); do \
+		printf '\t{\n\t\tstruct rq *rq%d = bpf_per_cpu_ptr(&runqueues, %d);\n\t\tif (rq%d)\n\t\t\tsample += rq%d->nr_running;\n\t}\n' $$i $$i $$i $$i; \
+	done > $@
+
+bin/global_running_tracker.bpf.o: ebpf/idle_avg/global_running_tracker.bpf.c bin/global_running_tracker_cpu_loop.h $(PVSCHED_HDR) | bin include/vmlinux.h
+	$(BPF_CC) $(BPF_PROG_CFLAGS) -Ibin $(BPF_INCLUDE) -c $< -o $@
+
+include/global_running_tracker.skel.h: bin/global_running_tracker.bpf.o
+	bpftool gen skeleton $< > $@
+
+bin/global_running_tracker.loader: include/global_running_tracker.skel.h ebpf/idle_avg/global_running_tracker.loader.c
+	gcc ebpf/idle_avg/global_running_tracker.loader.c -o $@ $(BPF_CFLAGS) $(BPF_LDLIBS) $(BPF_INCLUDE)
+
+idle_avg: bin/global_running_tracker.loader
+
 # eBPF meta target
-bpf: bin/create_maps.loader timer
+bpf: bin/create_maps.loader idle_avg timer
 
 # ============================================================
 # ============================================================
@@ -100,6 +122,9 @@ userspace: bin $(SRCS) user/cleanup.c
 
 run_bpf: bpf
 	sudo ./bin/create_maps.loader
+	sudo ./bin/global_running_tracker.loader > /tmp/global_running_tracker.log 2>&1 &
+	sleep 1
+	sudo ./bin/timer.loader > /tmp/timer.log 2>&1 &
 
 
 # ============================================================
@@ -107,4 +132,4 @@ run_bpf: bpf
 # ============================================================
 
 clean:
-	rm -rf bin include/create_maps.skel.h include/timer.skel.h
+	rm -rf bin include/create_maps.skel.h include/timer.skel.h include/global_running_tracker.skel.h
