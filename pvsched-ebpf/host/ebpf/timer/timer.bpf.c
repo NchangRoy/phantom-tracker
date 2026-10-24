@@ -9,8 +9,13 @@ char LICENSE[] SEC("license") = "GPL";
 
 #define CLOCK_BOOTTIME 7
 
-#define MSG_INDEX H2G_FIRST_HISTORY_SLOT
 #define MSG_TIMER_PERIOD_NS 4000000ULL /* 4 ms */
+
+/* Slot 0 (H2G_LATEST_SLOT) always mirrors the newest watermark - the
+ * host_ivshmem.ko kfunc does that unconditionally regardless of which
+ * index we write. Slots H2G_FIRST_HISTORY_SLOT..NR_HOST_IVSHMEM_MSGS-1
+ * are the history region. */
+#define H2G_HISTORY_SLOT_COUNT (NR_HOST_IVSHMEM_MSGS - H2G_FIRST_HISTORY_SLOT)
 // timer map and struct
 
 
@@ -30,6 +35,18 @@ struct {
 	__type(key, __u32);
 	__type(value, struct elem);
 } timer_map SEC(".maps");
+
+/* Published by the idle_avg program (global_running_tracker.bpf.c) at
+ * PIN_PATH_GLOBAL_TRACKER_STATE (/sys/fs/bpf/global_tracker_state).
+ * timer.loader.c reuses that pinned fd via bpf_map__reuse_fd() before
+ * load, same as it does for vms/vcpus/map_registry below — so the
+ * idle_avg loader must run first to actually publish it. */
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, struct global_runnx_tracker_state);
+} global_tracker_state SEC(".maps");
 
 // bpf maps
 
@@ -137,6 +154,50 @@ static __s64 phantom_average(void *map_ptr, int nb_samples)
 }
 
 /*
+ * Inputs: vm - the VM whose per-VM history cursor to advance
+ * Outputs: Returns the next H2G history slot to write
+ * Description: Atomically advances vm->h2g_history_index and wraps it
+ *              (mod H2G_HISTORY_SLOT_COUNT) back to the first history
+ *              slot once the region fills up, so writes keep cycling
+ *              through the whole history window instead of piling up
+ *              on the last slot.
+ */
+static __u32 next_history_slot(struct vm_t *vm)
+{
+	__u32 idx = __sync_fetch_and_add(&vm->h2g_history_index, 1) %
+		    H2G_HISTORY_SLOT_COUNT;
+
+	return H2G_FIRST_HISTORY_SLOT + idx;
+}
+
+/*
+ * Inputs: index - H2G history slot to write (H2G_FIRST_HISTORY_SLOT..
+ *             NR_HOST_IVSHMEM_MSGS - 1), ts - host timestamp (ns)
+ *             recorded at the end of the scheduler tick, phantom_avg -
+ *             just-computed phantom average, idle_avg - most recent
+ *             idle average published by the idle_avg program
+ * Outputs: None
+ * Description: Packs {ts, phantom_avg, idle_avg} into a single 64-bit
+ *              watermark - 0xTTTTTTTT PPPP IIII, upper 32 bits the
+ *              timestamp, next 16 bits the phantom average, low 16 bits
+ *              the idle average - and publishes it to the guest over
+ *              ivshmem via the host_ivshmem.ko kfunc. The kfunc mirrors
+ *              every write into slot 0 as the latest value regardless
+ *              of index.
+ */
+static void write_watermark(__u32 index, __u64 ts, __s64 phantom_avg,
+			     __u64 idle_avg)
+{
+	struct hg_message msg = {};
+
+	msg.msg = ((ts & 0xffffffffULL) << 32) |
+		  ((((__u64)phantom_avg) & 0xffffULL) << 16) |
+		  (idle_avg & 0xffffULL);
+
+	bpf_host_ivshmem_h2g_write(index, &msg);
+}
+
+/*
  * Inputs: map - pointer to the BPF timer map
  *         key - pointer to the map key
  *         val - pointer to the element containing the timer
@@ -177,7 +238,6 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 	void *collection_map_ptr, *processing_map_ptr;
 	int nb_samples;
 	void *map_to_use;
-	struct hg_message msg = {};
 
 	vm_name = (const char *)key;
 	vm = (struct vm_t *)value;
@@ -255,11 +315,19 @@ static long callback_fn(struct bpf_map *map, const void *key, void *value,
 		nb_samples = end_idx;
 		map_to_use = processing_map_ptr;
 	}
+	
 	__s64 avg = phantom_average(map_to_use, nb_samples);
 
+	__u32 state_key = 0;
+	struct global_runnx_tracker_state *gstate =
+		bpf_map_lookup_elem(&global_tracker_state, &state_key);
+	__u64 idle_avg = gstate ? gstate->last_idle_avg : 0;
+
+	__u64 ts = bpf_ktime_get_ns();
+	__u32 history_slot = next_history_slot(vm);
+
 	bpf_printk("Phantom average is %lld\n", avg);
-	msg.msg=avg;
-	bpf_host_ivshmem_h2g_write(MSG_INDEX, &msg);
+	write_watermark(history_slot, ts, avg, idle_avg);
 	return 0;
 }
 

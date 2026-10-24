@@ -5,6 +5,7 @@
 #include <bpf/libbpf.h>
 #include <bpf/bpf.h>
 #include "phantom_tracker.h"
+#include "register_vm_bpf.h"
 
 static struct timer_bpf *skel;
 static struct bpf_link *prog_link;
@@ -29,7 +30,7 @@ static void cleanup(int sig)
  */
 int main()
 {
-	int vcpus_fd, vms_fd, map_registry_fd;
+	int vcpus_fd, vms_fd, map_registry_fd, global_tracker_state_fd;
 
 	skel = timer_bpf__open();
 	if (!skel) {
@@ -62,6 +63,17 @@ int main()
 		if (bpf_map__reuse_fd(skel->maps.map_registry,
 				      map_registry_fd) < 0) {
 			perror("reuse map_registry map");
+			goto cleanup_inner;
+		}
+	}
+
+	/* Published by global_running_tracker's loader; must run first. */
+	global_tracker_state_fd = bpf_obj_get(PIN_PATH_GLOBAL_TRACKER_STATE);
+	if (global_tracker_state_fd >= 0) {
+		printf("reusing pinned global_tracker_state map\n");
+		if (bpf_map__reuse_fd(skel->maps.global_tracker_state,
+				      global_tracker_state_fd) < 0) {
+			perror("reuse global_tracker_state map");
 			goto cleanup_inner;
 		}
 	}
