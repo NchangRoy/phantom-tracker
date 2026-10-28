@@ -57,5 +57,10 @@ pvsched-shmem/host/usr/register_vm_backend
 scripts/*.qcow2
 *.iso
 
+# Host-guest development share
+/hg_shared_dir/
+/hg_noise_shared_dir/
+/hg_noise_shared_dir/
+
 # Generated BPF headers
 vmlinux.h

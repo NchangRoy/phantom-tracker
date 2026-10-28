@@ -10,7 +10,7 @@
 # Provides:
 #   cloudinit_check_deps            — verify required tools are installed
 #   cloudinit_make_iso <out.iso> \  — write a cloud-init seed ISO
-#       <hostname> <ssh-pubkey>
+#       <hostname> <ssh-pubkey> <password> <vm-type> <mode>
 
 # shellcheck source=distro.sh
 . "$(dirname "${BASH_SOURCE[0]}")/distro.sh"
@@ -55,19 +55,14 @@ cloudinit_create_overlay() {
 }
 
 # Generate a cloud-init seed ISO with user-data and meta-data.
-# Usage: cloudinit_make_iso <out.iso> <hostname> <ssh-pubkey-string> <password> <type>
-#   <type> is "target" or "noise" -- only "target" VMs get the guest_ivshmem
-#   kernel module and omp_thread_reg BPF program built and started, since
-#   only target VMs have the ivshmem-plain PCI device attached by
-#   create_vm.sh in the first place. Building/loading that stack on a noise
-#   VM is wasted work, and modprobe guest_ivshmem fails outright there since
-#   no matching PCI device exists for it to bind to.
+# Usage: cloudinit_make_iso <out.iso> <hostname> <ssh-pubkey-string> <password> <vm-type> <mode>
 cloudinit_make_iso() {
     local iso="$1"
     local hostname="$2"
     local ssh_pubkey="$3"
     local password="$4"
-    local type="$5"
+    local vm_type="$5"
+    local mode="$6"
     if [[ -f "$iso" ]]; then
         echo "seed ISO already present: $iso"
         return 0
@@ -76,7 +71,7 @@ cloudinit_make_iso() {
     tmpdir="$(mktemp -d)"
     trap 'rm -rf "$tmpdir"' RETURN
 
-    if [[ "$type" == "target" ]]; then
+    if [[ "$vm_type" == "target" ]]; then
         cat > "$tmpdir/user-data" <<EOF
 #cloud-config
 hostname: ${hostname}
@@ -207,11 +202,50 @@ users:
 package_update: true
 package_upgrade: false
 packages:
-  - qemu-guest-agent
   - openssh-server
+EOF
+
+    if [[ "$vm_type" == "target" ]]; then
+        cat >> "$tmpdir/user-data" <<EOF
+  - make
+  - gcc
+  - gfortran
+  - bpftool
+  - gcc-bpf
+  - libbpf-dev
+  - pahole
+  - linux-source-6.1
+  - libelf-dev
+  - zlib1g-dev
+EOF
+    elif [[ "$vm_type" == "noise" && "$mode" == "dev" ]]; then
+        cat >> "$tmpdir/user-data" <<EOF
+  - stress-ng
+EOF
+    fi
+
+    if [[ "$mode" == "dev" ]]; then
+        cat >> "$tmpdir/user-data" <<EOF
+  - trace-cmd
+EOF
+    fi
+
+    cat >> "$tmpdir/user-data" <<EOF
 runcmd:
   - systemctl enable --now ssh
-  - systemctl enable --now qemu-guest-agent
+EOF
+    fi
+
+    if [[ "$vm_type" == "target" ]]; then
+        # Resolve the version inside the guest, not on the host generating
+        # the seed. An unavailable header package must not block the tools.
+        cat >> "$tmpdir/user-data" <<'EOF'
+  - |
+      kernel_release=$(uname -r)
+      if ! DEBIAN_FRONTEND=noninteractive apt-get install -y "linux-headers-$kernel_release"; then
+          echo "warning: kernel headers for $kernel_release could not be installed; guest module builds require matching headers" >&2
+          echo "install matching headers manually, or install a matching kernel/header pair and reboot before building modules" >&2
+      fi
 EOF
     fi
 

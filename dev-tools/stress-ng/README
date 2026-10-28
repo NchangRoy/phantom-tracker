@@ -1,0 +1,108 @@
+Guest-compatible stress-ng builds
+=================================
+
+This contributor tool builds stress-ng 0.19.02 on the host for the Debian 12
+amd64 noise guests provisioned by scripts/create_vm.sh. Debian 12's packaged
+0.15.06 lacks the scheduler workload used by scripts/evaluate.sh.
+
+One completed build can be distributed to multiple noise VMs. No compiler
+or container runtime is needed in the guests. VM creation does not depend
+on this tool; it remains separate from the driver, BPF and libgomp builds.
+
+
+Build on the host
+-----------------
+
+Requires Docker on an x86_64 Linux host. Run from the project root, stopping
+on any error (set -e). Use sudo docker if daemon access requires it. In shell
+assignments, sudo belongs inside the command substitution:
+
+    docker build --platform linux/amd64 \
+        -t phantom-stress-ng:0.19.02-debian12 dev-tools/stress-ng
+    BUILD_IMAGE=$(docker image inspect --format '{{.Id}}' phantom-stress-ng:0.19.02-debian12)
+
+For sudo users, the second line is:
+
+    BUILD_IMAGE=$(sudo docker image inspect --format '{{.Id}}' phantom-stress-ng:0.19.02-debian12)
+
+Choose a new, empty build directory outside the repository. Each invocation
+uses a fresh source copy and refuses to reuse build output:
+
+    STRESS_BUILD="$HOME/src/build/stress-ng-0.19.02"
+    mkdir -p "$STRESS_BUILD"
+    docker run --rm --platform linux/amd64 \
+        --user "$(id -u):$(id -g)" \
+        --mount "type=bind,src=$STRESS_BUILD,dst=/build" \
+        --env BUILD_JOBS="$(nproc)" \
+        "$BUILD_IMAGE"
+    printf '%s\n' "$BUILD_IMAGE" > "$STRESS_BUILD/release/container-image.txt"
+
+BUILD_JOBS uses all processing units available to the host shell. The image
+contains the checksum-verified upstream source; docker run needs no network.
+The build uses Debian's native compiler, a generic x86-64 CPU target, fixed
+container paths, C locale, UTC, and the source archive's timestamp through
+SOURCE_DATE_EPOCH. It does not build GCC.
+
+STATIC=1 produces a binary without shared-library dependencies. The builder
+checks that property and runs a one-second, one-worker smoke test with the
+same scheduler settings used by evaluate.sh before publishing release/.
+Optional stressors requiring libraries absent from the build image may be
+unavailable; this artifact is intended for the scheduler workload.
+
+release/ contains the binary, its SHA256SUMS, license, source checksum,
+compiler/package and configuration records, version, and smoke-test output.
+Full source, objects and build.log remain in STRESS_BUILD outside the repo.
+
+
+Publish and use in noise guests
+-------------------------------
+
+Publish the completed release to a new directory in the noise share:
+
+    STRESS_RELEASE="$PWD/hg_noise_shared_dir/stress-ng/0.19.02"
+    mkdir -p "$(dirname "$STRESS_RELEASE")"
+    mkdir "$STRESS_RELEASE"
+    cp -a "$STRESS_BUILD/release/." "$STRESS_RELEASE/"
+
+Export ./hg_noise_shared_dir in each noise VM with --mode=dev and
+--shared-dir=./hg_noise_shared_dir when launching from the project root
+(../hg_noise_shared_dir from scripts/). Sharing is read-only by default.
+Follow the sharing guide at ../../Documentation/host-guest-sharing.md to mount hostshare at /mnt/hostshare inside each VM.
+The container does not need to stay running.
+
+Inside each noise VM, copy the release onto its own disk and verify it:
+
+    GUEST_STRESS="$HOME/stress-ng-releases/0.19.02"
+    mkdir -p "$(dirname "$GUEST_STRESS")"
+    mkdir "$GUEST_STRESS"
+    cp -a --no-preserve=ownership /mnt/hostshare/stress-ng/0.19.02/. "$GUEST_STRESS/"
+    (cd "$GUEST_STRESS" && sha256sum -c SHA256SUMS)
+    "$GUEST_STRESS/stress-ng" --version
+    sudo install -m 0755 "$GUEST_STRESS/stress-ng" /usr/local/bin/stress-ng
+    hash -r
+    command -v stress-ng
+    sudo sh -c 'command -v stress-ng; stress-ng --version'
+
+Both lookups must select /usr/local/bin/stress-ng. This leaves the distro's
+/usr/bin/stress-ng intact. evaluate.sh uses the newer binary via PATH and
+checks the required options before starting a batch. Use identical release
+hashes and noise parameters across default, passive and pvsched batches.
+Run from the guest disk; 9p is only the distribution channel.
+
+
+Reproducing a build
+-------------------
+
+The release version and archive SHA-256 are fixed in Dockerfile. Retain the
+built image by ID (for example, docker image save), build output and release
+metadata. BASE_IMAGE can be overridden with a digest-pinned Debian 12 image.
+The default base tag and apt repositories can change, so rebuilding the
+Dockerfile later does not itself freeze compiler/package versions. Reuse
+the saved build image to preserve those inputs. Byte-for-byte reproducibility
+requires a second clean build and comparison of release/SHA256SUMS.
+
+The static binary still requires compatible x86-64 Linux kernel facilities;
+validate the scheduler workload in each guest before collecting results.
+
+Upstream build instructions and static build support:
+https://github.com/ColinIanKing/stress-ng/blob/V0.19.02/README.md

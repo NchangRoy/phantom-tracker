@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Allow QEMU users in the kvm group to access the shared-memory backend.
+SUBSYSTEM=="host_ivshmem", KERNEL=="host_ivshmem[0-9]*", GROUP="kvm", MODE="0660"

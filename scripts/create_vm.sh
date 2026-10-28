@@ -10,6 +10,9 @@
 
 set -euo pipefail # exit on error, unset variable, or failed pipeline
 
+# Non-root shells may omit system tools such as bpftool and modprobe.
+export PATH="${PATH}:/usr/local/sbin:/usr/sbin:/sbin"
+
 arch="$(uname -m)"
 if [[ "$arch" != "x86_64" ]]; then
     echo "error: unsupported host architecture: $arch (x86_64 required)" >&2
@@ -31,6 +34,7 @@ check_cmd qemu-system-x86_64 qemu-system-x86 fedora=qemu-kvm rhel=qemu-kvm cento
 declare_arg name           required "Name of the VM"
 declare_arg type           required "VM type (target or noise)"
 declare_arg ssh-pubkey     required "Path to SSH public key file to inject into the VM"
+declare_arg mode           optional "VM mode (user or dev; sharing is dev-only)" user
 declare_arg password       optional "Password for the debian user (for console login)" debian
 declare_arg sockets        optional "Number of CPU sockets" 1
 declare_arg cores          optional "Number of cores per socket" 2
@@ -44,8 +48,45 @@ declare_arg vsock-cid      optional "Guest CID for vhost-vsock (required when --
 declare_arg per-vm-cgroups    optional "Use cgroups for the VM" true
 declare_arg pin-to-socket     optional "Pin VM to a specific NUMA node" false
 declare_arg socket-nr         optional "NUMA node number (required when --pin-to-socket=true)"
+declare_arg shared-dir        optional "Host directory to create and share via 9p in dev mode (guest mount tag: hostshare)" ""
+
+declare_arg shared-dir-readonly optional "Export the shared directory read-only" true
 
 parse_args "$@" # parse all space-separated args
+
+if [[ "$ARG_MODE" != user && "$ARG_MODE" != dev ]]; then
+    echo "error: --mode must be either user or dev" >&2
+    exit 1
+fi
+if [[ "$ARG_MODE" == user && -n "${ARG_SHARED_DIR:-}" ]]; then
+    echo "note: --shared-dir is ignored in user mode; use --mode=dev to enable sharing" >&2
+fi
+
+if [[ "$ARG_SHARED_DIR_READONLY" != true && "$ARG_SHARED_DIR_READONLY" != false ]]; then
+    echo "error: --shared-dir-readonly must be true or false" >&2
+    exit 1
+fi
+SHARED_DIR_ACCESS=rw
+SHARED_DIR_READONLY=off
+if [[ "$ARG_SHARED_DIR_READONLY" == true ]]; then
+    SHARED_DIR_ACCESS=ro
+    SHARED_DIR_READONLY=on
+fi
+
+SHARED_DIR_QEMU_ARGS=()
+AUTO_MOUNT_HOSTSHARE=false
+if [[ "$ARG_MODE" == dev && -n "${ARG_SHARED_DIR:-}" ]]; then
+    if [[ "$ARG_TYPE" == target ]]; then
+        AUTO_MOUNT_HOSTSHARE=true
+    fi
+    mkdir -p -- "$ARG_SHARED_DIR"
+    ARG_SHARED_DIR="$(realpath -- "$ARG_SHARED_DIR")"
+    # Use nativecores host files and symlinks, including trees copied into the share.
+    # QEMU key-value options escape literal commas by doubling them.
+    SHARED_DIR_QEMU_ARGS=(
+        -virtfs "local,id=hostshare,path=${ARG_SHARED_DIR//,/,,},mount_tag=hostshare,security_model=none,readonly=$SHARED_DIR_READONLY"
+    )
+fi
 
 if [[ -z "${ARG_SSH_PORT:-}" ]]; then
     ARG_SSH_PORT="$(find_free_tcp_port 2222)"
@@ -109,6 +150,10 @@ if [[ "$ARG_TYPE" == "target" ]]; then
     create_pvsched_shmem_setup
 
     cleanup_target_pvsched_shmem() {
+        if [[ -n "${mount_worker:-}" ]]; then
+            kill "$mount_worker" 2>/dev/null || true
+            wait "$mount_worker" 2>/dev/null || true
+        fi
         if ! create_pvsched_shmem_cleanup; then
             echo "warning: failed to fully clean up host_ivshmem resources" >&2
         fi
@@ -192,9 +237,15 @@ fi
 # Print the effective configuration before launching the VM.
 echo "name: $ARG_NAME"
 echo "type: $ARG_TYPE"
+echo "mode: $ARG_MODE"
 echo "ssh-port: $ARG_SSH_PORT"
 echo "pin-to-socket: $ARG_PIN_TO_SOCKET"
 echo "socket-nr: ${ARG_SOCKET_NR:-}"
+
+if [[ "$ARG_MODE" == dev && -n "${ARG_SHARED_DIR:-}" ]]; then
+    echo "shared-dir: $ARG_SHARED_DIR ($SHARED_DIR_ACCESS, guest mount tag: hostshare)"
+fi
+
 if [[ "$ARG_TYPE" == "target" ]]; then
     echo "hostbackend-device: ${HOSTBACKEND_DEVICE:-unavailable}"
 fi
@@ -205,17 +256,22 @@ SEED_ISO="${ARG_NAME}-seed.iso"
 
 if [[ -f "$DISK_IMG" ]]; then
     echo "disk image $DISK_IMG already exists, booting from it"
-    SEED_ISO_ARG=()
 else
     cloudinit_check_deps
     if [[ ! -f "$ARG_SSH_PUBKEY" ]]; then
         echo "error: SSH public key file not found: $ARG_SSH_PUBKEY" >&2
-        exit 1
+        exit 1cores
     fi
     SSH_PUBKEY_STR="$(cat "$ARG_SSH_PUBKEY")"
     cloudinit_fetch_base_image "$ARG_BASE_IMAGE"
     cloudinit_create_overlay   "$ARG_BASE_IMAGE" "$DISK_IMG" "$ARG_DISK_SIZE"
-    cloudinit_make_iso         "$SEED_ISO" "$ARG_NAME" "$SSH_PUBKEY_STR" "$ARG_PASSWORD" "$ARG_TYPE"
+    cloudinit_make_iso         "$SEED_ISO" "$ARG_NAME" "$SSH_PUBKEY_STR" "$ARG_PASSWORD" "$ARG_TYPE" "$ARG_MODE"
+fi
+
+# A previous launch may have failed before cloud-init ran. Keep the seed
+# attached on retries; cloud-init tracks completed provisioning in the guest.
+SEED_ISO_ARG=()
+if [[ -f "$SEED_ISO" ]]; then
     SEED_ISO_ARG=(-drive "file=$SEED_ISO,format=raw,if=virtio,readonly=on")
 fi
 
@@ -242,6 +298,7 @@ QEMU_CMD+=(
     -smp "$CPU_TOPOLOGY"
     -drive "file=$DISK_IMG,format=qcow2,if=virtio"
     "${IVSHMEM_QEMU_ARGS[@]}"
+    "${SHARED_DIR_QEMU_ARGS[@]}"
     "${SEED_ISO_ARG[@]}"
     -net nic,model=virtio
     -net "user,hostfwd=tcp::${ARG_SSH_PORT}-:22"
@@ -280,11 +337,25 @@ echo "launching VM:"
 printf '  %q' "${QEMU_CMD[@]}" # Print the full qemu command
 printf '\n'
 echo "once booted, SSH in with: ssh -p $ARG_SSH_PORT debian@localhost"
+
+if [[ "$AUTO_MOUNT_HOSTSHARE" == true ]]; then
+    echo "shared-dir: will mount automatically at /mnt/hostshare once guest SSH is ready"
+elif [[ "$ARG_MODE" == dev && -n "${ARG_SHARED_DIR:-}" ]]; then
+    echo "mount the shared directory inside the guest with:"
+    echo "  sudo mkdir -p /mnt/hostshare"
+    echo "  sudo mount -t 9p -o trans=virtio,version=9p2000.L,$SHARED_DIR_ACCESS hostshare /mnt/hostshare"
+fi
+
 if [[ -n "${SEED_ISO_ARG[*]}" ]]; then
     echo "note: first boot runs cloud-init, SSH may take 1-2 minutes to become available"
 fi
 echo "starting in 10 seconds..." # Sleep before starting to give the user a chance to read the output and cancel if something looks wrong
 sleep 10
+mount_worker=""
+if [[ "$AUTO_MOUNT_HOSTSHARE" == true ]]; then
+    ssh_mount_hostshare "$ARG_SSH_PORT" "$ARG_SSH_PUBKEY" "$SHARED_DIR_ACCESS" &
+    mount_worker=$!
+fi
 set +e
 "${QEMU_CMD[@]}" &
 qemu_pid=$!

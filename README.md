@@ -12,6 +12,20 @@ Oversubscription is a popular cost-cutting practice in cloud deployments, which 
 
 This implementation is part of a GSoC Project [2] that targets QEMU/KVM virtual machines, uses ivshmem-plain device [3] for facilitating the paravirtualized task scheduling related communication, and provides integration tools for using Phantom Tracker with libgomp, i.e. GCC's implementation of OpenMP.
 
+Contributor instructions for building guest-compatible libgomp on the host
+are in [dev-tools/libgomp](dev-tools/libgomp/README). This development tool is
+independent of VM provisioning and is not required for packaged installations.
+
+For the scheduler noise workload used in development experiments,
+[dev-tools/stress-ng](dev-tools/stress-ng/README) builds a pinned stress-ng
+binary on the host for distribution to multiple noise VMs.
+
+## Usage guides
+
+- [VM creation and provisioning](Documentation/vm-creation.md)
+- [Host–guest development sharing](Documentation/host-guest-sharing.md)
+- [Script helper libraries](Documentation/script-libraries.md)
+
 ## References
 [1] https://inria.hal.science/tel-05438117v2
 
