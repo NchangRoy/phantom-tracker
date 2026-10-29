@@ -4,7 +4,9 @@
  *
  * Attaches gomp_dop_decision_handler to usdt:libgomp:gomp:dop_decision,
  * fired once per parallel region by pv_gomp_dynamic_max_threads() when
- * GOMP_DYNAMIC_POLICY=pvsched is active.
+ * GOMP_DYNAMIC_POLICY=pvsched is active, and gomp_dyn_max_threads_handler
+ * to usdt:libgomp:gomp:dyn_max_threads, fired on every call to
+ * gomp_dynamic_max_threads() regardless of policy.
  *
  * Remains attached until SIGINT or SIGTERM (Ctrl+C) is received.
  *
@@ -39,6 +41,7 @@ int main(void)
 {
 	struct dop_decision_bpf *skel = NULL;
 	struct bpf_link *dop_decision_link = NULL;
+	struct bpf_link *dyn_max_threads_link = NULL;
 	const char *libgomp_path = LIBGOMP_PATH;
 	int err = 0;
 
@@ -65,6 +68,20 @@ int main(void)
 	printf("Attached → %s : gomp:dop_decision (gomp_dop_decision_handler)\n",
 	       libgomp_path);
 
+	dyn_max_threads_link = bpf_program__attach_usdt(
+		skel->progs.gomp_dyn_max_threads_handler, -1, libgomp_path,
+		"gomp", "dyn_max_threads", NULL);
+	err = libbpf_get_error(dyn_max_threads_link);
+	if (err) {
+		dyn_max_threads_link = NULL;
+		fprintf(stderr,
+			"failed to attach usdt:%s:gomp:dyn_max_threads: %s\n",
+			libgomp_path, strerror(-err));
+		goto cleanup;
+	}
+	printf("Attached → %s : gomp:dyn_max_threads (gomp_dyn_max_threads_handler)\n",
+	       libgomp_path);
+
 	printf("\nAttached. Running... Press Ctrl+C to exit.\n");
 
 	while (!exiting)
@@ -73,6 +90,7 @@ int main(void)
 	printf("\nExiting and detaching...\n");
 
 cleanup:
+	bpf_link__destroy(dyn_max_threads_link);
 	bpf_link__destroy(dop_decision_link);
 	dop_decision_bpf__destroy(skel);
 	return err ? 1 : 0;

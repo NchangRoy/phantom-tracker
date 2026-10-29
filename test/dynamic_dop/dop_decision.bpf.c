@@ -68,9 +68,31 @@ int gomp_dop_decision_handler(struct pt_regs *ctx)
 				 (void *)context_addr) < 0)
 		return 0;
 
-	bpf_printk("CPU %u: OMP thread %u dop=%d phantom_avg=%d idle_avg=%d\n",
-		   core, omp_tid, decision.curr_dop,
+	bpf_printk(" OMP dop=%d phant_avg=%d idle_avg=%d\n",
+		     decision.curr_dop,
 		   decision.phantom_average, context.idle_average);
+
+	return 0;
+}
+
+/*
+ * Program: usdt:libgomp:gomp:dyn_max_threads
+ *
+ * Fires on every call to gomp_dynamic_max_threads(), under both
+ * GOMP_DYNAMIC_POLICY=pvsched and the default OMP_DYNAMIC heuristic, so
+ * the resolved thread count is visible even on a default run where
+ * dop_decision never fires. Carries a single arg: the resolved count
+ * itself, not a pointer.
+ */
+SEC("usdt")
+int gomp_dyn_max_threads_handler(struct pt_regs *ctx)
+{
+	__u64 dop = 0;
+
+	if (bpf_usdt_arg(ctx, 0, (long *)&dop) < 0)
+		return 0;
+
+	bpf_printk(" OMP gomp_dynamic_max_threads -> dop=%d\n", (int)dop);
 
 	return 0;
 }
